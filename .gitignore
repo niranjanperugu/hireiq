@@ -1,0 +1,73 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+.env.docker
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+node_modules/
+dist/
+build/
+target/
+*.jar
+*.class
+
+# Logs
+logs/
+*.log
+
+# Database
+*.sqlite
+*.db
+
+# Cache
+.cache/
+.pytest_cache/
+.node_modules_cache/
+
+# Dependencies
+package-lock.json
+yarn.lock
+pom.xml.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+.temp/
+
+# Frontend specific
+frontend/dist/
+frontend/node_modules/
+frontend/coverage/
+frontend/.vite/
+
+# Backend specific
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+backend/logs/
+
+# Docker
+.dockerignore
+
+# AWS
+.aws/
+credentials
+
+# Secrets
+secrets/
+*.key
+*.pem
+*.p12

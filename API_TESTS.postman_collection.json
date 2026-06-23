@@ -1,0 +1,633 @@
+{
+  "info": {
+    "name": "HireSmart API Tests",
+    "description": "Complete API test collection for HireSmart backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"password\": \"SecurePassword123!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const responseData = pm.response.json();",
+                  "  pm.environment.set('jwt_token', responseData.token);",
+                  "  pm.environment.set('refresh_token', responseData.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john.doe@example.com\",\n  \"password\": \"SecurePassword123!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Candidates",
+      "item": [
+        {
+          "name": "Get All Candidates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/candidates?page=0&size=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "candidates"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Candidate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"email\": \"jane.smith@example.com\",\n  \"phone\": \"+1-555-0123\",\n  \"location\": \"San Francisco, CA\",\n  \"currentCompany\": \"Tech Corp\",\n  \"currentDesignation\": \"Senior Developer\",\n  \"totalExperienceYears\": 5,\n  \"summary\": \"Experienced full-stack developer with 5 years of expertise in Java and React\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/candidates",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "candidates"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Candidate by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/candidates/{{candidate_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "candidates",
+                "{{candidate_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Candidate",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"email\": \"jane.smith@example.com\",\n  \"phone\": \"+1-555-0124\",\n  \"location\": \"San Francisco, CA\",\n  \"currentCompany\": \"Tech Corp\",\n  \"currentDesignation\": \"Lead Developer\",\n  \"totalExperienceYears\": 6,\n  \"summary\": \"Experienced full-stack developer with 6 years of expertise\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/candidates/{{candidate_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "candidates",
+                "{{candidate_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Candidate",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/candidates/{{candidate_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "candidates",
+                "{{candidate_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Candidates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/candidates/search?query=Jane&page=0&size=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "candidates",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "Jane"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Get All Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/jobs?page=0&size=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "jobs"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Senior Java Developer\",\n  \"description\": \"We are looking for an experienced Java developer with strong backend expertise. Must have 5+ years of experience with Spring Boot and microservices architecture.\",\n  \"employmentType\": \"FULL_TIME\",\n  \"workMode\": \"HYBRID\",\n  \"location\": \"San Francisco, CA\",\n  \"minExperienceYears\": 5,\n  \"maxExperienceYears\": 10,\n  \"salaryMin\": 120000,\n  \"salaryMax\": 180000,\n  \"status\": \"DRAFT\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/jobs",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "jobs"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Job by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/jobs/{{job_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "jobs",
+                "{{job_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Job",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Senior Java Developer\",\n  \"description\": \"We are looking for an experienced Java developer with strong backend expertise. Must have 5+ years of experience with Spring Boot and microservices architecture. Located in downtown SF.\",\n  \"employmentType\": \"FULL_TIME\",\n  \"workMode\": \"HYBRID\",\n  \"location\": \"San Francisco, CA\",\n  \"minExperienceYears\": 5,\n  \"maxExperienceYears\": 10,\n  \"salaryMin\": 130000,\n  \"salaryMax\": 190000,\n  \"status\": \"OPEN\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/jobs/{{job_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "jobs",
+                "{{job_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Job",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/jobs/{{job_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "jobs",
+                "{{job_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/jobs/search?query=Java&page=0&size=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "jobs",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "Java"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Applications",
+      "item": [
+        {
+          "name": "Get All Applications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/applications?page=0&size=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "applications"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"candidateId\": \"{{candidate_id}}\",\n  \"jobId\": \"{{job_id}}\",\n  \"status\": \"APPLIED\",\n  \"appliedDate\": \"2026-06-19\",\n  \"similarityScore\": 87\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/applications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "applications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Application by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/applications/{{application_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "applications",
+                "{{application_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Application Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SHORTLISTED\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/applications/{{application_id}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "applications",
+                "{{application_id}}",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Applications by Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/applications?status=SHORTLISTED&page=0&size=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "applications"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "SHORTLISTED"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Health Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Health Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/details",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health",
+                "details"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "candidate_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "application_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

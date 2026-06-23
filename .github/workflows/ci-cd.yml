@@ -1,0 +1,345 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ${{ github.repository }}/hiresmart-backend
+  FRONTEND_IMAGE: ${{ github.repository }}/hiresmart-frontend
+
+jobs:
+  # Backend Tests
+  backend-test:
+    runs-on: ubuntu-latest
+    name: Backend - Test & Build
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: hiresmart_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v3
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run backend tests
+        working-directory: ./backend
+        run: mvn clean test
+
+      - name: Run integration tests
+        working-directory: ./backend
+        run: mvn verify
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/hiresmart_test
+          SPRING_DATASOURCE_USERNAME: test_user
+          SPRING_DATASOURCE_PASSWORD: test_password
+
+      - name: Check code coverage
+        working-directory: ./backend
+        run: mvn jacoco:report
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/target/site/jacoco/jacoco.xml
+          flags: backend
+          name: backend-coverage
+
+      - name: Build Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker build -t ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }} ./backend
+          docker tag ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
+
+  # Frontend Tests
+  frontend-test:
+    runs-on: ubuntu-latest
+    name: Frontend - Test & Build
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run linter
+        working-directory: ./frontend
+        run: npm run lint || true
+
+      - name: Run unit tests
+        working-directory: ./frontend
+        run: npm run test
+
+      - name: Generate coverage report
+        working-directory: ./frontend
+        run: npm run test:coverage || npm run test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./frontend/coverage/coverage-final.json
+          flags: frontend
+          name: frontend-coverage
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+        env:
+          VITE_API_URL: https://api.example.com/api/v1
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend/dist
+
+      - name: Build Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker build -t ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }} ./frontend
+          docker tag ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
+
+  # Security Scan
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scanning
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Run npm audit
+        working-directory: ./frontend
+        continue-on-error: true
+        run: npm audit --audit-level=moderate
+
+      - name: Run Maven dependency check
+        working-directory: ./backend
+        continue-on-error: true
+        run: |
+          mvn org.owasp:dependency-check-maven:check || true
+
+  # Push Images
+  push-images:
+    needs: [backend-test, frontend-test, security-scan]
+    runs-on: ubuntu-latest
+    name: Push Docker Images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: meta
+        run: |
+          VERSION=$(git describe --tags --always)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:buildcache,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:buildcache,mode=max
+
+  # Deploy to Staging
+  deploy-staging:
+    needs: push-images
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Extract version
+        id: meta
+        run: |
+          VERSION=$(git describe --tags --always)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Deploy to staging
+        env:
+          DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.STAGING_HOST }}
+          DEPLOY_USER: ${{ secrets.STAGING_USER }}
+          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST << 'EOF'
+            cd hiresmart
+            docker-compose pull
+            docker-compose up -d
+            docker-compose ps
+          EOF
+
+      - name: Run smoke tests
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+        run: |
+          sleep 10
+          curl -f $STAGING_URL/api/v1/health/status || exit 1
+          echo "Staging deployment successful"
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "Staging deployment ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Staging Deployment* - ${{ job.status }}\nVersion: ${{ steps.meta.outputs.version }}"
+                  }
+                }
+              ]
+            }
+
+  # Deploy to Production (Requires Manual Approval)
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Extract version
+        id: meta
+        run: |
+          VERSION=$(git describe --tags --always)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Deploy to production
+        env:
+          DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.PROD_HOST }}
+          DEPLOY_USER: ${{ secrets.PROD_USER }}
+          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST << 'EOF'
+            cd hiresmart
+            git pull origin main
+            docker-compose pull
+            docker-compose down
+            docker-compose up -d
+            docker-compose ps
+          EOF
+
+      - name: Verify production deployment
+        env:
+          PROD_URL: ${{ secrets.PROD_URL }}
+        run: |
+          sleep 15
+          curl -f $PROD_URL/api/v1/health/status || exit 1
+          echo "Production deployment successful"
+
+      - name: Notify team
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "Production deployment ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment* - ${{ job.status }}\nVersion: ${{ steps.meta.outputs.version }}\nCommit: <https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
+                  }
+                }
+              ]
+            }
