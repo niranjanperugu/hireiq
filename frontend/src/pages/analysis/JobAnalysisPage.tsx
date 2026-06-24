@@ -37,6 +37,47 @@ interface Job {
   location?: string
 }
 
+interface SkillEvidence {
+  skill: string
+  evidence_level: number
+  evidence: string
+}
+
+interface FullAnalysis {
+  overall_score?: number
+  recommendation?: string
+  job_description_match?: {
+    score: number
+    matched_responsibilities: string[]
+    missing_responsibilities: string[]
+    matched_qualifications: string[]
+    missing_qualifications: string[]
+  }
+  required_skills_match?: {
+    score: number
+    required_skills_count: number
+    matched_skills_count: number
+    matched_skills: string[]
+    partially_matched_skills: string[]
+    missing_skills: string[]
+    skill_evidence: SkillEvidence[]
+  }
+  experience_match?: { score: number; required_years: number; candidate_years: number }
+  job_title_match?: { score: number; candidate_title: string; target_title: string }
+  location_match?: { score: number; candidate_location: string; job_location: string; match_type: string }
+  seniority_match?: { score: number; candidate_level: string; required_level: string }
+  achievement_impact?: { score: number; achievements: string[] }
+  education_certifications?: { score: number }
+  ats_readability?: { score: number }
+  critical_missing_requirements?: string[]
+  top_strengths?: string[]
+  high_priority_gaps?: string[]
+  improvement_recommendations?: string[]
+  interview_probability?: { percentage: number; assessment: string }
+  recruiter_summary?: string
+  hiring_manager_summary?: string
+}
+
 interface ResumeAnalysis {
   id: string
   candidateName: string
@@ -55,6 +96,9 @@ interface ResumeAnalysis {
   analyzedAt: string | null
   isApplied?: boolean
   appliedAt?: string | null
+  hiringRecommendation?: string | null
+  fullAnalysis?: FullAnalysis
+  isDuplicate?: boolean
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -75,78 +119,403 @@ const TEXT1  = '#1E293B'
 const TEXT2  = '#64748B'
 const TEXT3  = '#94A3B8'
 
+const recBg = (r?: string | null) => {
+  if (!r) return '#94a3b8'
+  if (r === 'Top Candidate')   return '#059669'
+  if (r === 'Strong Interview') return '#2563eb'
+  if (r === 'Interview')       return '#7c3aed'
+  if (r === 'Consider')        return '#d97706'
+  return '#dc2626'
+}
+
+const evidenceBadge = (level: number) => {
+  const map: Record<number, { label: string; color: string }> = {
+    0: { label: 'Missing',  color: '#dc2626' },
+    1: { label: 'Mentioned', color: '#d97706' },
+    2: { label: 'Demonstrated', color: '#2563eb' },
+    3: { label: 'Strong', color: '#059669' },
+    4: { label: 'Expert', color: '#7c3aed' },
+  }
+  return map[level] ?? map[0]
+}
+
+// Compact hover tooltip content
+const AiSummaryTooltip: React.FC<{ result: ResumeAnalysis }> = ({ result }) => {
+  const fa = result.fullAnalysis
+  const summary = fa?.recruiter_summary || result.professionalSummary
+  if (!summary) return null
+  return (
+    <Box sx={{ p: 1, maxWidth: 340 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75 }}>
+        <Box sx={{
+          width: 32, height: 32, borderRadius: '50%', bgcolor: atsColor(result.atsScore),
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#fff', fontWeight: 700, fontSize: 12, flexShrink: 0,
+        }}>{Math.round(result.atsScore)}</Box>
+        <Box>
+          <Typography sx={{ fontWeight: 700, fontSize: 13, lineHeight: 1.2 }}>{result.candidateName}</Typography>
+          {fa?.recommendation && (
+            <Box component="span" sx={{
+              fontSize: 10, fontWeight: 700, px: 0.75, py: 0.25, borderRadius: 1,
+              bgcolor: recBg(fa.recommendation), color: '#fff',
+            }}>{fa.recommendation}</Box>
+          )}
+        </Box>
+      </Box>
+      <Typography sx={{ fontSize: 12, lineHeight: 1.5, color: '#e2e8f0' }}>{summary}</Typography>
+      {fa?.interview_probability?.percentage != null && (
+        <Typography sx={{ fontSize: 11, mt: 0.75, color: '#94a3b8' }}>
+          Interview probability: <strong style={{ color: '#fff' }}>{fa.interview_probability.percentage}%</strong>
+          {fa.interview_probability.assessment ? ` — ${fa.interview_probability.assessment}` : ''}
+        </Typography>
+      )}
+    </Box>
+  )
+}
+
 // ── View Dialog ───────────────────────────────────────────────────────────────
-const ViewDialog: React.FC<{ result: ResumeAnalysis | null; onClose: () => void }> = ({ result, onClose }) => (
-  <Dialog open={!!result} onClose={onClose} maxWidth="md" fullWidth>
-    {result && (
-      <>
-        <DialogTitle sx={{ pb: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{
-              width: 48, height: 48, borderRadius: '50%', bgcolor: atsColor(result.atsScore),
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#fff', fontWeight: 700, fontSize: 15, flexShrink: 0,
-            }}>
-              {Math.round(result.atsScore)}
-            </Box>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>{result.candidateName}</Typography>
-              <Typography variant="body2" color="textSecondary">
-                {result.currentRole || '—'} · {atsLabel(result.atsScore)} Match
-              </Typography>
-            </Box>
-          </Box>
-        </DialogTitle>
-        <DialogContent dividers>
-          <Grid container spacing={2}>
-            {[
-              { label:'Email', value:result.email },
-              { label:'Phone', value:result.phone },
-              { label:'Experience', value:`${result.yearsOfExperience ?? 0} years` },
-              { label:'Education', value:result.education },
-              { label:'Rating', value:result.rating },
-              { label:'Resume File', value:result.resumeFileName },
-            ].map(({ label, value }) => (
-              <Grid item xs={12} sm={4} key={label}>
-                <Typography variant="caption" color="textSecondary">{label}</Typography>
-                <Typography variant="body2">{value || '—'}</Typography>
-              </Grid>
-            ))}
-            <Grid item xs={12}>
-              <Divider sx={{ my: 0.5 }} />
-              <Typography variant="caption" color="textSecondary">Professional Summary</Typography>
-              <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-                {result.professionalSummary || '—'}
-              </Typography>
-            </Grid>
-            {[
-              { label:`Matched Skills (${result.matchedSkills?.length ?? 0})`, skills:result.matchedSkills, color:'success' as const },
-              { label:`Missing Skills (${result.missingSkills?.length ?? 0})`, skills:result.missingSkills, color:'error' as const },
-            ].map(({ label, skills, color }) => (
-              <Grid item xs={12} sm={6} key={label}>
-                <Typography variant="caption" color="textSecondary" sx={{ fontWeight: 600 }}>{label}</Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                  {(skills || []).map(s => <Chip key={s} label={s} size="small" color={color} variant="outlined" />)}
-                  {!skills?.length && <Typography variant="body2" color="textSecondary">None</Typography>}
-                </Box>
-              </Grid>
-            ))}
-            {result.resumeS3Url && (
-              <Grid item xs={12}>
-                <Button size="small" variant="outlined" href={result.resumeS3Url} target="_blank" rel="noopener noreferrer">
-                  Download Resume
-                </Button>
-              </Grid>
-            )}
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={onClose}>Close</Button>
-        </DialogActions>
-      </>
+const SectionHeader: React.FC<{ label: string; score?: number }> = ({ label, score }) => (
+  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1 }}>
+    <Typography variant="caption" sx={{ fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, color: '#64748b', fontSize: 10 }}>
+      {label}
+    </Typography>
+    {score != null && (
+      <Chip label={`${Math.round(score)}/100`} size="small" sx={{
+        height: 16, fontSize: 9, fontWeight: 700,
+        bgcolor: score >= 70 ? '#dcfce7' : score >= 40 ? '#fef3c7' : '#fee2e2',
+        color: score >= 70 ? '#15803d' : score >= 40 ? '#d97706' : '#dc2626',
+      }} />
     )}
-  </Dialog>
+    <Box sx={{ flex: 1, height: '1px', bgcolor: '#e2e8f0' }} />
+  </Box>
 )
+
+const ViewDialog: React.FC<{ result: ResumeAnalysis | null; onClose: () => void }> = ({ result, onClose }) => {
+  const fa = result?.fullAnalysis
+  return (
+    <Dialog open={!!result} onClose={onClose} maxWidth="lg" fullWidth PaperProps={{ sx: { maxHeight: '92vh' } }}>
+      {result && (
+        <>
+          <DialogTitle sx={{ pb: 1, borderBottom: '1px solid #e2e8f0' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box sx={{
+                width: 52, height: 52, borderRadius: '50%', bgcolor: atsColor(result.atsScore),
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', fontWeight: 800, fontSize: 16, flexShrink: 0,
+              }}>
+                {Math.round(result.atsScore)}
+              </Box>
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>{result.candidateName}</Typography>
+                <Typography variant="body2" color="textSecondary">
+                  {result.currentRole || '—'} · {result.yearsOfExperience ?? 0} yrs exp · {result.education || '—'}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+                {fa?.recommendation && (
+                  <Chip label={fa.recommendation} size="small"
+                    sx={{ bgcolor: recBg(fa.recommendation), color: '#fff', fontWeight: 700 }} />
+                )}
+                {fa?.interview_probability?.percentage != null && (
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>
+                    {fa.interview_probability.percentage}% interview probability
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          </DialogTitle>
+
+          <DialogContent dividers sx={{ p: 2 }}>
+            <Grid container spacing={2}>
+
+              {/* ── LEFT COLUMN ── */}
+              <Grid item xs={12} md={7}>
+
+                {/* Contact */}
+                <SectionHeader label="Contact" />
+                <Grid container spacing={1}>
+                  {[
+                    { label: 'Email', value: result.email },
+                    { label: 'Phone', value: result.phone },
+                    { label: 'Location', value: fa?.location_match?.candidate_location },
+                    { label: 'Resume', value: result.resumeFileName },
+                  ].map(({ label, value }) => (
+                    <Grid item xs={6} key={label}>
+                      <Typography variant="caption" color="textSecondary">{label}</Typography>
+                      <Typography variant="body2" sx={{ fontSize: 12 }}>{value || '—'}</Typography>
+                    </Grid>
+                  ))}
+                </Grid>
+
+                {/* Recruiter Summary */}
+                {(fa?.recruiter_summary || result.professionalSummary) && (
+                  <>
+                    <SectionHeader label="Recruiter Summary" />
+                    <Typography variant="body2" sx={{ color: '#374151', lineHeight: 1.7, fontSize: 13 }}>
+                      {fa?.recruiter_summary || result.professionalSummary}
+                    </Typography>
+                  </>
+                )}
+
+                {/* Hiring Manager Summary */}
+                {fa?.hiring_manager_summary && (
+                  <>
+                    <SectionHeader label="Hiring Manager View" />
+                    <Typography variant="body2" sx={{ color: '#374151', lineHeight: 1.7, fontSize: 13 }}>
+                      {fa.hiring_manager_summary}
+                    </Typography>
+                  </>
+                )}
+
+                {/* JD Match */}
+                {fa?.job_description_match && (
+                  <>
+                    <SectionHeader label="JD Match (50%)" score={fa.job_description_match.score} />
+                    <Grid container spacing={1}>
+                      {(fa.job_description_match.matched_responsibilities?.length > 0) && (
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="caption" sx={{ color: '#15803d', fontWeight: 700 }}>
+                            Matched Responsibilities
+                          </Typography>
+                          <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                            {fa.job_description_match.matched_responsibilities.map((r, i) => (
+                              <Typography key={i} component="li" variant="body2" sx={{ fontSize: 12, color: '#374151', mb: 0.15 }}>{r}</Typography>
+                            ))}
+                          </Box>
+                        </Grid>
+                      )}
+                      {(fa.job_description_match.missing_responsibilities?.length > 0) && (
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="caption" sx={{ color: '#dc2626', fontWeight: 700 }}>
+                            Missing Responsibilities
+                          </Typography>
+                          <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                            {fa.job_description_match.missing_responsibilities.map((r, i) => (
+                              <Typography key={i} component="li" variant="body2" sx={{ fontSize: 12, color: '#374151', mb: 0.15 }}>{r}</Typography>
+                            ))}
+                          </Box>
+                        </Grid>
+                      )}
+                      {(fa.job_description_match.matched_qualifications?.length > 0) && (
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="caption" sx={{ color: '#15803d', fontWeight: 700 }}>
+                            Matched Qualifications
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
+                            {fa.job_description_match.matched_qualifications.map((q, i) => (
+                              <Chip key={i} label={q} size="small" color="success" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
+                            ))}
+                          </Box>
+                        </Grid>
+                      )}
+                      {(fa.job_description_match.missing_qualifications?.length > 0) && (
+                        <Grid item xs={12} sm={6}>
+                          <Typography variant="caption" sx={{ color: '#dc2626', fontWeight: 700 }}>
+                            Missing Qualifications
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
+                            {fa.job_description_match.missing_qualifications.map((q, i) => (
+                              <Chip key={i} label={q} size="small" color="error" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
+                            ))}
+                          </Box>
+                        </Grid>
+                      )}
+                    </Grid>
+                  </>
+                )}
+
+                {/* Skills Evidence Table */}
+                {fa?.required_skills_match && (
+                  <>
+                    <SectionHeader
+                      label={`Skills (10%) — ${fa.required_skills_match.matched_skills_count ?? 0}/${fa.required_skills_match.required_skills_count ?? 0} matched`}
+                      score={fa.required_skills_match.score}
+                    />
+                    {(fa.required_skills_match.skill_evidence?.length > 0) ? (
+                      <Table size="small" sx={{ '& td, & th': { py: 0.5, px: 1, fontSize: 12 } }}>
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                            <TableCell sx={{ fontWeight: 700 }}>Skill</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Level</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Evidence</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {fa.required_skills_match.skill_evidence.map((se, i) => {
+                            const badge = evidenceBadge(se.evidence_level)
+                            return (
+                              <TableRow key={i}>
+                                <TableCell sx={{ fontWeight: 600 }}>{se.skill}</TableCell>
+                                <TableCell>
+                                  <Box component="span" sx={{
+                                    fontSize: 10, fontWeight: 700, px: 0.75, py: 0.25, borderRadius: 1,
+                                    bgcolor: badge.color + '20', color: badge.color, border: `1px solid ${badge.color}40`,
+                                  }}>{badge.label}</Box>
+                                </TableCell>
+                                <TableCell sx={{ color: '#64748b', maxWidth: 200 }}>{se.evidence || '—'}</TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                        {(fa.required_skills_match.matched_skills || []).map(s => (
+                          <Chip key={s} label={s} size="small" color="success" variant="outlined" />
+                        ))}
+                        {(fa.required_skills_match.missing_skills || []).map(s => (
+                          <Chip key={s} label={s} size="small" color="error" variant="outlined" />
+                        ))}
+                      </Box>
+                    )}
+                  </>
+                )}
+
+              </Grid>
+
+              {/* ── RIGHT COLUMN ── */}
+              <Grid item xs={12} md={5}>
+
+                {/* Component Scores */}
+                <SectionHeader label="Score Breakdown" />
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                  {[
+                    { label: 'JD Match',    score: fa?.job_description_match?.score,    weight: '50%' },
+                    { label: 'Skills',      score: fa?.required_skills_match?.score,    weight: '10%' },
+                    { label: 'Experience',  score: fa?.experience_match?.score,         weight: '10%' },
+                    { label: 'Job Title',   score: fa?.job_title_match?.score,          weight: '5%' },
+                    { label: 'Location',    score: fa?.location_match?.score,           weight: '5%' },
+                    { label: 'Seniority',   score: fa?.seniority_match?.score,          weight: '5%' },
+                    { label: 'Achievements',score: fa?.achievement_impact?.score,       weight: '5%' },
+                    { label: 'Education',   score: fa?.education_certifications?.score, weight: '3%' },
+                    { label: 'ATS Format',  score: fa?.ats_readability?.score,          weight: '2%' },
+                  ].map(({ label, score, weight }) => {
+                    const s = score ?? 0
+                    return (
+                      <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography sx={{ fontSize: 12, width: 90, color: '#374151', flexShrink: 0 }}>{label}</Typography>
+                        <Typography sx={{ fontSize: 10, color: '#94a3b8', width: 28, flexShrink: 0 }}>{weight}</Typography>
+                        <Box sx={{
+                          flex: 1, height: 6, borderRadius: 3, bgcolor: '#e2e8f0', overflow: 'hidden',
+                        }}>
+                          <Box sx={{
+                            width: `${s}%`, height: '100%', borderRadius: 3,
+                            bgcolor: s >= 70 ? '#22c55e' : s >= 40 ? '#f59e0b' : '#ef4444',
+                            transition: 'width 0.4s ease',
+                          }} />
+                        </Box>
+                        <Typography sx={{ fontSize: 11, fontWeight: 700, width: 26, textAlign: 'right', color: s >= 70 ? '#15803d' : s >= 40 ? '#d97706' : '#dc2626' }}>
+                          {Math.round(s)}
+                        </Typography>
+                      </Box>
+                    )
+                  })}
+                </Box>
+
+                {/* Experience / Title / Location details */}
+                {fa?.experience_match && (
+                  <>
+                    <SectionHeader label="Experience" score={fa.experience_match.score} />
+                    <Typography variant="body2" sx={{ fontSize: 12, color: '#374151' }}>
+                      Required: {fa.experience_match.required_years} yrs · Candidate: {fa.experience_match.candidate_years} yrs
+                    </Typography>
+                  </>
+                )}
+                {fa?.job_title_match && (
+                  <>
+                    <SectionHeader label="Job Title Match" score={fa.job_title_match.score} />
+                    <Typography variant="body2" sx={{ fontSize: 12, color: '#374151' }}>
+                      {fa.job_title_match.candidate_title || '—'} vs {fa.job_title_match.target_title || '—'}
+                    </Typography>
+                  </>
+                )}
+                {fa?.seniority_match && (
+                  <>
+                    <SectionHeader label="Seniority" score={fa.seniority_match.score} />
+                    <Typography variant="body2" sx={{ fontSize: 12, color: '#374151' }}>
+                      Candidate: {fa.seniority_match.candidate_level || '—'} · Required: {fa.seniority_match.required_level || '—'}
+                    </Typography>
+                  </>
+                )}
+
+                {/* Achievements */}
+                {(fa?.achievement_impact?.achievements?.length ?? 0) > 0 && (
+                  <>
+                    <SectionHeader label="Achievements" score={fa!.achievement_impact!.score} />
+                    <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                      {fa!.achievement_impact!.achievements.map((a, i) => (
+                        <Typography key={i} component="li" variant="body2" sx={{ fontSize: 12, color: '#374151', mb: 0.15 }}>{a}</Typography>
+                      ))}
+                    </Box>
+                  </>
+                )}
+
+                {/* Top Strengths */}
+                {(fa?.top_strengths?.length ?? 0) > 0 && (
+                  <>
+                    <SectionHeader label="Top Strengths" />
+                    <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                      {fa!.top_strengths!.map((s, i) => (
+                        <Typography key={i} component="li" variant="body2" sx={{ fontSize: 12, color: '#15803d', mb: 0.15 }}>{s}</Typography>
+                      ))}
+                    </Box>
+                  </>
+                )}
+
+                {/* High Priority Gaps */}
+                {(fa?.high_priority_gaps?.length ?? 0) > 0 && (
+                  <>
+                    <SectionHeader label="Priority Gaps" />
+                    <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                      {fa!.high_priority_gaps!.map((g, i) => (
+                        <Typography key={i} component="li" variant="body2" sx={{ fontSize: 12, color: '#dc2626', mb: 0.15 }}>{g}</Typography>
+                      ))}
+                    </Box>
+                  </>
+                )}
+
+                {/* Critical Missing */}
+                {(fa?.critical_missing_requirements?.length ?? 0) > 0 && (
+                  <>
+                    <SectionHeader label="Critical Missing Requirements" />
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {fa!.critical_missing_requirements!.map((r, i) => (
+                        <Chip key={i} label={r} size="small" sx={{ bgcolor: '#fee2e2', color: '#dc2626', fontSize: 10, height: 20 }} />
+                      ))}
+                    </Box>
+                  </>
+                )}
+
+                {/* Improvement Recommendations */}
+                {(fa?.improvement_recommendations?.length ?? 0) > 0 && (
+                  <>
+                    <SectionHeader label="Recommendations" />
+                    <Box component="ol" sx={{ m: 0, pl: 2 }}>
+                      {fa!.improvement_recommendations!.map((r, i) => (
+                        <Typography key={i} component="li" variant="body2" sx={{ fontSize: 12, color: '#374151', mb: 0.15 }}>{r}</Typography>
+                      ))}
+                    </Box>
+                  </>
+                )}
+
+                {result.resumeS3Url && (
+                  <Box sx={{ mt: 2 }}>
+                    <Button size="small" variant="outlined" href={result.resumeS3Url} target="_blank" rel="noopener noreferrer">
+                      Download Resume
+                    </Button>
+                  </Box>
+                )}
+              </Grid>
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={onClose}>Close</Button>
+          </DialogActions>
+        </>
+      )}
+    </Dialog>
+  )
+}
 
 // ── Edit Dialog ───────────────────────────────────────────────────────────────
 const EditDialog: React.FC<{
@@ -294,9 +663,30 @@ const AnalysisPopup: React.FC<{
                     <Checkbox checked={selected.has(r.id)} size="small"
                       onChange={()=>toggle(r.id)} onClick={e=>e.stopPropagation()} />
                   </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" sx={{fontWeight:500}}>{r.candidateName}</Typography>
-                    <Typography variant="caption" color="textSecondary">{r.resumeFileName}</Typography>
+                  <TableCell onClick={e=>e.stopPropagation()}>
+                    {r.isDuplicate ? (
+                      <Box>
+                        <Box sx={{display:'flex',alignItems:'center',gap:0.75,mb:0.25}}>
+                          <Typography variant="body2" sx={{fontWeight:500,color:'#64748B'}}>{r.candidateName}</Typography>
+                          <Chip label="Duplicate Record" size="small" sx={{
+                            height:18,fontSize:9,fontWeight:700,
+                            bgcolor:'#FEF2F2',color:'#DC2626',border:'1px solid #FECACA',borderRadius:1
+                          }}/>
+                        </Box>
+                        <Typography variant="caption" color="textSecondary">Analysis skipped — profile already exists for this job</Typography>
+                      </Box>
+                    ) : (
+                      <Tooltip
+                        title={(r.fullAnalysis?.recruiter_summary || r.professionalSummary) ? <AiSummaryTooltip result={r} /> : ''}
+                        placement="right" arrow
+                        componentsProps={{ tooltip: { sx: { bgcolor: '#1e293b', maxWidth: 360, p: 0 } }, arrow: { sx: { color: '#1e293b' } } }}
+                      >
+                        <Box sx={{ cursor: 'default' }}>
+                          <Typography variant="body2" sx={{fontWeight:500}}>{r.candidateName}</Typography>
+                          <Typography variant="caption" color="textSecondary">{r.resumeFileName}</Typography>
+                        </Box>
+                      </Tooltip>
+                    )}
                   </TableCell>
                   <TableCell><Typography variant="body2">{r.currentRole||'—'}</Typography></TableCell>
                   <TableCell><Typography variant="body2">{r.email||'—'}</Typography></TableCell>
@@ -316,14 +706,18 @@ const AnalysisPopup: React.FC<{
                     </Box>
                   </TableCell>
                   <TableCell>
-                    <Box sx={{display:'inline-flex',flexDirection:'column',alignItems:'center',gap:0.25}}>
-                      <Box sx={{width:42,height:42,borderRadius:'50%',bgcolor:atsColor(r.atsScore),
-                        display:'flex',alignItems:'center',justifyContent:'center',
-                        color:'#fff',fontWeight:700,fontSize:13}}>
-                        {Math.round(r.atsScore)}
+                    {r.isDuplicate ? (
+                      <Typography variant="caption" sx={{color:'#DC2626',fontWeight:600}}>—</Typography>
+                    ) : (
+                      <Box sx={{display:'inline-flex',flexDirection:'column',alignItems:'center',gap:0.25}}>
+                        <Box sx={{width:42,height:42,borderRadius:'50%',bgcolor:atsColor(r.atsScore),
+                          display:'flex',alignItems:'center',justifyContent:'center',
+                          color:'#fff',fontWeight:700,fontSize:13}}>
+                          {Math.round(r.atsScore)}
+                        </Box>
+                        <Typography variant="caption" sx={{fontWeight:600,fontSize:10}}>{atsLabel(r.atsScore)}</Typography>
                       </Box>
-                      <Typography variant="caption" sx={{fontWeight:600,fontSize:10}}>{atsLabel(r.atsScore)}</Typography>
-                    </Box>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -442,10 +836,24 @@ const ResultsTable: React.FC<{
               ):paginated.map(r=>(
                 <TableRow key={r.id} hover>
                   <TableCell>
-                    <Typography variant="body2" sx={{fontWeight:500}}>{r.candidateName}</Typography>
-                    <Typography variant="caption" color="textSecondary" noWrap sx={{maxWidth:160,display:'block'}}>
-                      {r.resumeFileName}
-                    </Typography>
+                    <Tooltip
+                      title={(r.fullAnalysis?.recruiter_summary || r.professionalSummary) ? <AiSummaryTooltip result={r} /> : ''}
+                      placement="right" arrow
+                      componentsProps={{ tooltip: { sx: { bgcolor: '#1e293b', maxWidth: 380, p: 0 } }, arrow: { sx: { color: '#1e293b' } } }}
+                    >
+                      <Box>
+                        <Typography variant="body2" sx={{fontWeight:500,cursor:'default'}}>{r.candidateName}</Typography>
+                        <Typography variant="caption" color="textSecondary" noWrap sx={{maxWidth:160,display:'block'}}>
+                          {r.resumeFileName}
+                        </Typography>
+                        {r.fullAnalysis?.recommendation && (
+                          <Box component="span" sx={{
+                            fontSize: 9, fontWeight: 700, px: 0.5, py: 0.2, borderRadius: 0.5,
+                            bgcolor: recBg(r.fullAnalysis.recommendation), color: '#fff', display: 'inline-block', mt: 0.25,
+                          }}>{r.fullAnalysis.recommendation}</Box>
+                        )}
+                      </Box>
+                    </Tooltip>
                   </TableCell>
 
                   {/* Status column */}

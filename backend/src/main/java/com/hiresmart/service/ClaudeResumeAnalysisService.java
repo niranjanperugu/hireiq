@@ -26,59 +26,115 @@ public class ClaudeResumeAnalysisService {
     @Value("${anthropic.api.base-url:https://api.anthropic.com}")
     private String baseUrl;
 
-    @Value("${anthropic.api.model:claude-haiku-4-5-20251001}")
+    @Value("${anthropic.api.model:claude-sonnet-4-6}")
     private String model;
 
-    @Value("${anthropic.api.max-tokens:1500}")
+    @Value("${anthropic.api.max-tokens:4000}")
     private int maxTokens;
 
     private static final String PROMPT_TEMPLATE =
-        "You are an expert ATS (Applicant Tracking System) and resume analyst.\n\n" +
-        "Your task: deeply analyze the resume against the job requirements and produce an accurate ATS score.\n" +
-        "Return ONLY a valid JSON object — no markdown, no code fences, no explanation.\n\n" +
-        "=== JOB REQUIREMENTS ===\n" +
+        "You are an Enterprise ATS, Technical Recruiter, and Hiring Manager.\n" +
+        "Analyze the Resume against the Job Description exactly as a modern ATS screening system would.\n" +
+        "Return ONLY strict JSON - no markdown, no code fences, no explanation.\n\n" +
+
+        "=== JOB INFORMATION ===\n" +
         "Job Title: {jobTitle}\n" +
-        "Required Skills: {requiredSkillsCsv}\n" +
-        "Min Experience: {minExperience} years\n" +
-        "Max Experience: {maxExperience} years\n" +
-        "Job Description:\n{jobDescription}\n" +
-        "{nlpContext}\n" +
-        "=== RESUME TEXT ===\n" +
+        "Known Required Skills: {requiredSkillsCsv}\n" +
+        "Min Experience: {minExperience} yrs | Max Experience: {maxExperience} yrs\n" +
+        "Job Description:\n{jobDescription}\n\n" +
+
+        "{nlpContext}" +
+        "=== RESUME ===\n" +
         "{resumeText}\n\n" +
-        "=== INSTRUCTIONS ===\n" +
-        "1. NLP HINTS: If NLP PRE-EXTRACTED ENTITIES are provided above, use them as high-confidence anchors:\n" +
-        "   - Prefer the NLP-extracted name, email, phone over your own extraction.\n" +
-        "   - Use the NLP-computed experience as the starting point; adjust only if the resume text clearly contradicts it.\n" +
-        "   - NLP-identified skills are confirmed present — include them in matchedSkills if they are in the required list.\n\n" +
-        "2. EXPERIENCE: If NLP experience is 0 or not provided, scan ALL work history entries, " +
-        "compute each job's duration from its start/end dates (use today = {currentYear} for current roles), and SUM them. " +
-        "Return the total as an integer in yearsOfExperience. Never return 0 if there is visible work history.\n\n" +
-        "3. SKILLS: Extract every technical skill, framework, tool, language, or platform mentioned anywhere in the resume. " +
-        "For matchedSkills, check each required skill against the full resume text — " +
-        "include a skill if the resume demonstrates it even if the exact keyword differs (e.g. 'Spring Boot' matches 'SpringBoot'). " +
-        "missingSkills = required skills genuinely absent from the resume.\n\n" +
-        "3. ATS SCORE — use this formula, integer 0–100:\n" +
-        "   a) Skill match (35%): matchedSkills.size / max(requiredSkills.size, 1) × 35\n" +
-        "   b) Experience fit (25%): if exp >= minExp → 25; if exp > maxExp → 18 (overqualified); else (exp / max(minExp,1)) × 25\n" +
-        "   c) Job description relevance (25%): read the job description carefully. How well does the candidate's background, " +
-        "      domain, responsibilities, and achievements align with what the JD asks for? Award 0–25 points.\n" +
-        "   d) Education (10%): PhD/Master's = 10, Bachelor's = 7, Diploma = 4, other = 1\n" +
-        "   e) Resume quality (5%): contact info present, quantified achievements, clear structure → 0–5 pts\n" +
-        "   Final atsScore = sum of a+b+c+d+e, capped at 100.\n\n" +
-        "=== OUTPUT ===\n" +
-        "Return exactly this JSON (use empty string for missing strings, 0 for missing numbers, [] for missing arrays):\n" +
+
+        "=== SCORING FORMULA ===\n" +
+        "Each component score is 0-100. overall_score = (\n" +
+        "  job_description_match.score * 0.50 +\n" +
+        "  required_skills_match.score * 0.10 +\n" +
+        "  experience_match.score      * 0.10 +\n" +
+        "  job_title_match.score       * 0.05 +\n" +
+        "  location_match.score        * 0.05 +\n" +
+        "  seniority_match.score       * 0.05 +\n" +
+        "  achievement_impact.score    * 0.05 +\n" +
+        "  education_certifications.score * 0.03 +\n" +
+        "  ats_readability.score       * 0.02\n" +
+        ")\n\n" +
+
+        "NLP HINTS (if provided above): Use NLP-extracted name/email/phone as first priority for candidate_info.\n" +
+        "Use NLP experience as starting point; compute from work history dates if 0. Today = {currentYear}.\n\n" +
+
+        "JD MATCH (50%): Evaluate responsibilities alignment, role/domain/industry relevance, project relevance,\n" +
+        "required qualifications, preferred qualifications. Score 0-100.\n\n" +
+
+        "SKILLS (10%): Extract ALL required skills from the JD. For each assign evidence level:\n" +
+        "0=Missing, 1=Mentioned, 2=Demonstrated, 3=Strong Experience, 4=Expert/Lead Level.\n" +
+        "Score = (sum_of_levels / (4 * total_required)) * 100.\n\n" +
+
+        "EXPERIENCE (10%): Compare required vs actual years. Weight project complexity and scope.\n\n" +
+
+        "JOB TITLE (5%): Exact=100, Very Similar=80, Related=60, Weak=30.\n\n" +
+
+        "LOCATION (5%): Same City/State=100, Remote Eligible=100, Relocation Possible=70, Mismatch=20.\n\n" +
+
+        "SENIORITY (5%): Map candidate vs required level (Entry/Junior/Mid/Senior/Lead/Staff/Principal/Architect/Manager/Director).\n\n" +
+
+        "ACHIEVEMENTS (5%): Revenue impact, cost reduction, performance improvements, team leadership, quantified achievements.\n\n" +
+
+        "EDUCATION (3%): PhD/Masters=100, Bachelors=70, Diploma=40, Other=20.\n\n" +
+
+        "ATS READABILITY (2%): Parsing friendliness, clear sections, keyword placement.\n\n" +
+
+        "RECOMMENDATION thresholds:\n" +
+        "  overall_score >= 80 -> Top Candidate\n" +
+        "  overall_score >= 70 -> Strong Interview\n" +
+        "  overall_score >= 55 -> Interview\n" +
+        "  overall_score >= 40 -> Consider\n" +
+        "  overall_score <  40 -> Reject\n\n" +
+
+        "=== RETURN THIS EXACT JSON (use empty string for missing strings, 0 for missing numbers, [] for missing arrays) ===\n" +
         "{\n" +
-        "  \"candidateName\": \"full name\",\n" +
-        "  \"currentRole\": \"most recent job title\",\n" +
-        "  \"email\": \"email address\",\n" +
-        "  \"phone\": \"phone number\",\n" +
-        "  \"yearsOfExperience\": 0,\n" +
-        "  \"education\": \"PhD or Master's or Bachelor's or Diploma or High School\",\n" +
-        "  \"skills\": [\"every technical skill found in resume\"],\n" +
-        "  \"matchedSkills\": [\"required skills present in resume\"],\n" +
-        "  \"missingSkills\": [\"required skills absent from resume\"],\n" +
-        "  \"professionalSummary\": \"3-4 sentence summary highlighting fit for this specific role\",\n" +
-        "  \"atsScore\": 0\n" +
+        "  \"candidate_info\": {\n" +
+        "    \"name\": \"\",\n" +
+        "    \"email\": \"\",\n" +
+        "    \"phone\": \"\",\n" +
+        "    \"current_title\": \"\",\n" +
+        "    \"years_of_experience\": 0,\n" +
+        "    \"education\": \"PhD|Masters|Bachelors|Diploma|High School\",\n" +
+        "    \"location\": \"\",\n" +
+        "    \"all_skills\": []\n" +
+        "  },\n" +
+        "  \"overall_score\": 0,\n" +
+        "  \"recommendation\": \"Reject|Consider|Interview|Strong Interview|Top Candidate\",\n" +
+        "  \"job_description_match\": {\n" +
+        "    \"score\": 0,\n" +
+        "    \"matched_responsibilities\": [],\n" +
+        "    \"missing_responsibilities\": [],\n" +
+        "    \"matched_qualifications\": [],\n" +
+        "    \"missing_qualifications\": []\n" +
+        "  },\n" +
+        "  \"required_skills_match\": {\n" +
+        "    \"score\": 0,\n" +
+        "    \"required_skills_count\": 0,\n" +
+        "    \"matched_skills_count\": 0,\n" +
+        "    \"matched_skills\": [],\n" +
+        "    \"partially_matched_skills\": [],\n" +
+        "    \"missing_skills\": [],\n" +
+        "    \"skill_evidence\": [{\"skill\": \"\", \"evidence_level\": 0, \"evidence\": \"\"}]\n" +
+        "  },\n" +
+        "  \"experience_match\": {\"score\": 0, \"required_years\": 0, \"candidate_years\": 0},\n" +
+        "  \"job_title_match\": {\"score\": 0, \"candidate_title\": \"\", \"target_title\": \"\"},\n" +
+        "  \"location_match\": {\"score\": 0, \"candidate_location\": \"\", \"job_location\": \"\", \"match_type\": \"\"},\n" +
+        "  \"seniority_match\": {\"score\": 0, \"candidate_level\": \"\", \"required_level\": \"\"},\n" +
+        "  \"achievement_impact\": {\"score\": 0, \"achievements\": []},\n" +
+        "  \"education_certifications\": {\"score\": 0},\n" +
+        "  \"ats_readability\": {\"score\": 0},\n" +
+        "  \"critical_missing_requirements\": [],\n" +
+        "  \"top_strengths\": [],\n" +
+        "  \"high_priority_gaps\": [],\n" +
+        "  \"improvement_recommendations\": [],\n" +
+        "  \"interview_probability\": {\"percentage\": 0, \"assessment\": \"\"},\n" +
+        "  \"recruiter_summary\": \"\",\n" +
+        "  \"hiring_manager_summary\": \"\"\n" +
         "}";
 
     public ClaudeResumeAnalysisService(
@@ -118,7 +174,7 @@ public class ClaudeResumeAnalysisService {
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
 
-        log.info("Calling Claude API to analyze resume for job: {}", jobTitle);
+        log.info("Calling Claude API ({}) to analyze resume for job: {}", model, jobTitle);
         ResponseEntity<Map> response = restTemplate.exchange(
             baseUrl + "/v1/messages",
             HttpMethod.POST,
@@ -136,6 +192,10 @@ public class ClaudeResumeAnalysisService {
                 (List<Map<String, Object>>) responseBody.get("content");
             String text = (String) content.get(0).get("text");
             log.debug("Claude raw response: {}", text);
+            text = text.trim();
+            if (text.startsWith("```")) {
+                text = text.replaceAll("(?s)^```[a-z]*\\n?", "").replaceAll("```\\s*$", "").trim();
+            }
             return objectMapper.readValue(text, new TypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
             throw new RuntimeException("Failed to parse Claude API response: " + e.getMessage(), e);
@@ -145,14 +205,13 @@ public class ClaudeResumeAnalysisService {
     private String buildPrompt(String resumeText, String jobTitle, List<String> requiredSkills,
                                 Integer minExperience, Integer maxExperience, String jobDescription,
                                 NLPExtractedData nlpData) {
-        String truncatedResume = resumeText.length() > 4000
-            ? resumeText.substring(0, 4000) : resumeText;
+        String truncatedResume = resumeText.length() > 6000
+            ? resumeText.substring(0, 6000) : resumeText;
 
         String nlpSection = (nlpData != null && nlpData.getStructuredContext() != null)
-            ? "\n" + nlpData.getStructuredContext() + "\n"
+            ? "\n" + nlpData.getStructuredContext() + "\n\n"
             : "";
 
-        // Boost required skills with NLP-found skills for better coverage
         List<String> allSkills = new ArrayList<>(requiredSkills);
         if (nlpData != null && nlpData.getExtractedSkills() != null) {
             nlpData.getExtractedSkills().stream()

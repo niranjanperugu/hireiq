@@ -16,10 +16,24 @@ import {
 import { useNavigate } from 'react-router-dom'
 import {
   loadPipeline, loadSchedules, loadEvaluations,
-  savePipeline, PipelineCandidate, PipelineStage
+  savePipeline, PipelineCandidate, PipelineStage,
+  DEFAULT_STAGES, saveAppFlowEvent, saveShortlistRecord, uid,
+  loadInterviewRounds,
 } from '@utils/pipelineStorage'
 import apiClient from '@services/apiClient'
 import CandidateDetailModal, { CandidateModalData } from '@components/CandidateDetailModal'
+
+const SHORTLISTED_KEY = 'hs_shortlisted_applied'
+
+function readShortlistedIds(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(SHORTLISTED_KEY) || '[]')) } catch { return new Set() }
+}
+function writeShortlistedId(id: string) {
+  try {
+    const s = readShortlistedIds(); s.add(id)
+    localStorage.setItem(SHORTLISTED_KEY, JSON.stringify([...s]))
+  } catch {}
+}
 
 const NAVY    = '#F8FAFC'
 const NAVY_MID= '#FFFFFF'
@@ -69,6 +83,7 @@ const KPI: React.FC<{ label: string; value: number|string; icon: React.ReactNode
 interface AggRow {
   candidate: PipelineCandidate
   jobId: string
+  jobCode?: string
   jobTitle: string
   stages: PipelineStage[]
   currentStageId: string
@@ -87,9 +102,12 @@ interface AppliedRow {
   matchedSkills: string[]
   yearsOfExperience: number
   jobId: string
+  jobCode?: string
   jobTitle: string
   isApplied: boolean
   source?: string
+  totalApplications?: number
+  appliedJobTitles?: string[]
 }
 
 type SortKey = 'name' | 'atsScore' | 'jobTitle' | 'currentStageLabel'
@@ -102,7 +120,7 @@ const STAGE_COLOR: Record<string, string> = {
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate()
   const dispatch = useAppDispatch()
-  const { organizationId } = useAppSelector(s => s.auth)
+  const { organizationId, user } = useAppSelector(s => s.auth)
   const { jobs }           = useAppSelector(s => s.jobs)
 
   const [all,     setAll]     = useState<AggRow[]>([])
@@ -133,28 +151,33 @@ const DashboardPage: React.FC = () => {
       pl.candidates.forEach(c => {
         const sid   = pl.stageMap[c.id] ?? pl.stages[0]?.id ?? ''
         const stage = pl.stages.find(s => s.id === sid)
-        rows.push({ candidate: c, jobId: String(job.id), jobTitle: job.title,
+        // Use the latest interview round title when stage type is 'round'
+        const candidateRounds = loadInterviewRounds(c.id, String(job.id))
+        const latestRound = candidateRounds.length > 0 ? candidateRounds[candidateRounds.length - 1] : null
+        const stageLabel = (stage?.type === 'round' && latestRound)
+          ? latestRound.title
+          : (stage?.label ?? 'Unknown')
+        rows.push({ candidate: c, jobId: String(job.id), jobCode: job.jobCode, jobTitle: job.title,
           stages: pl.stages, currentStageId: sid,
-          currentStageLabel: stage?.label ?? 'Unknown', stageType: stage?.type ?? 'shortlist' })
+          currentStageLabel: stageLabel, stageType: stage?.type ?? 'shortlist' })
       })
     })
     setAll(rows)
   }
 
   const fetchApplied = useCallback(async () => {
-    if (!jobs.length) return
+    if (!organizationId) return
     try {
-      const results = await Promise.allSettled(
-        jobs.map(j =>
-          apiClient.get<AppliedRow[]>(`/resume-analysis/job/${j.id}/applied`)
-            .then(r => r.data.map(d => ({ ...d, jobId: String(j.id), jobTitle: j.title })))
-        )
-      )
-      const rows: AppliedRow[] = []
-      results.forEach(r => { if (r.status === 'fulfilled') rows.push(...r.value) })
+      const res = await apiClient.get(`/resume-analysis/org/${organizationId}/applied`)
+      const rows: AppliedRow[] = (res.data?.data ?? [])
       setApplied(rows)
     } catch { /* silent */ }
-  }, [jobs])
+  }, [organizationId])
+
+  // Enrich applied rows with jobCode from Redux jobs list
+  const appliedWithCode = useMemo(() =>
+    applied.map(r => ({ ...r, jobCode: r.jobCode ?? jobs.find(j => String(j.id) === r.jobId)?.jobCode }))
+  , [applied, jobs])
 
   useEffect(() => { if (organizationId) dispatch(fetchJobs({ organizationId, page: 0, size: 50 })) }, [organizationId, dispatch])
   useEffect(() => { rebuild() }, [jobs])
@@ -179,11 +202,14 @@ const DashboardPage: React.FC = () => {
     [all]
   )
 
-  // Applied candidates NOT already in any pipeline
-  const appliedNotInPipeline = useMemo(() =>
-    applied.filter(r => !pipelineEmails.has((r.email || '').toLowerCase())),
-    [applied, pipelineEmails]
-  )
+  // Applied candidates NOT already in any pipeline (enriched with jobCode)
+  const appliedNotInPipeline = useMemo(() => {
+    const shortlistedIds = readShortlistedIds()
+    return appliedWithCode.filter(r =>
+      !pipelineEmails.has((r.email || '').toLowerCase()) &&
+      !shortlistedIds.has(r.id)
+    )
+  }, [appliedWithCode, pipelineEmails, all])
 
   // Unique jobs present in applied list (for Job filter dropdown)
   const appliedJobs = useMemo(() => {
@@ -258,30 +284,58 @@ const DashboardPage: React.FC = () => {
   }
 
   const addToPipeline = (row: AppliedRow) => {
-    const pl    = loadPipeline(row.jobId)
-    const first = pl.stages[0]
-    if (!first) { setToast('No pipeline stages configured for this job'); return }
+    const pl     = loadPipeline(row.jobId)
+    const stages = pl.stages.length ? pl.stages : DEFAULT_STAGES
     if (pl.candidates.find(c => c.email === row.email)) {
       setToast(`${row.candidateName} is already in the pipeline`); return
     }
+    // Target the first stage (Shortlisted / entry point of the interview pipeline)
+    const target = stages[0]
+    if (!target) { setToast('No pipeline stages configured for this job'); return }
+
+    const candidateId = `applied_${row.id}`
+    const now = new Date().toISOString()
+    const authName  = `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim() || 'HR Admin'
+    const authRole  = (user?.role as string) ?? 'HR_ADMINISTRATOR'
+
     const newCand: PipelineCandidate = {
-      id:           `applied_${row.id}`,
-      name:         row.candidateName,
-      email:        row.email,
-      phone:        row.phone,
-      role:         row.currentRole ?? '',
-      atsScore:     row.atsScore,
-      matchedSkills:row.matchedSkills ?? [],
-      experience:   row.yearsOfExperience,
-      education:    '',
-      source:       'analysis',
-      addedAt:      new Date().toISOString(),
+      id:            candidateId,
+      name:          row.candidateName,
+      email:         row.email,
+      phone:         row.phone,
+      role:          row.currentRole ?? '',
+      atsScore:      row.atsScore,
+      matchedSkills: row.matchedSkills ?? [],
+      experience:    row.yearsOfExperience,
+      education:     '',
+      source:        'analysis',
+      addedAt:       now,
     }
     pl.candidates.push(newCand)
-    pl.stageMap[newCand.id] = first.id
+    pl.stageMap[candidateId] = target.id
     savePipeline(row.jobId, pl)
+    writeShortlistedId(row.id)
+
+    // Record shortlist record (shows in Application Flow timeline)
+    saveShortlistRecord({
+      id: uid(), candidateId, jobId: row.jobId,
+      candidateName: row.candidateName, candidateEmail: row.email,
+      shortlistedBy: authName, shortlistedByRole: authRole,
+      shortlistedByEmail: user?.email ?? '',
+      method: 'MANUAL', atsScore: row.atsScore, shortlistedAt: now,
+    })
+    // Record app flow event
+    saveAppFlowEvent({
+      id: uid(), candidateId, jobId: row.jobId,
+      type: 'SHORTLISTED',
+      label: `Moved to Interview Pipeline by ${authName}`,
+      detail: `Stage: ${target.label}`,
+      by: authName, byRole: authRole,
+      timestamp: now,
+    })
+
     rebuild()
-    setToast(`${row.candidateName} added to pipeline → ${first.label}`)
+    setToast(`${row.candidateName} moved to Interview Pipeline → ${target.label}`)
   }
 
   const openShortlist = (row: AppliedRow) => {
@@ -347,13 +401,10 @@ HireIQ Recruitment Team`
           </Typography>
         </Box>
         <Box display="flex" gap={1}>
-          <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={rebuild}
+          <Button size="small" variant="outlined" startIcon={<Refresh />}
+            onClick={() => { rebuild(); fetchApplied() }}
             sx={{ borderColor: NAVY_LT, color: '#64748B', '&:hover': { borderColor: ORANGE, color: ORANGE } }}>
             Refresh
-          </Button>
-          <Button size="small" variant="contained" onClick={promoteAll}
-            sx={{ bgcolor: ORANGE, '&:hover': { bgcolor: '#4338CA' }, fontWeight: 700 }}>
-            Promote Passed Candidates
           </Button>
         </Box>
       </Box>
@@ -408,7 +459,6 @@ HireIQ Recruitment Team`
                 <TableCell><TableSortLabel active={sortKey==='jobTitle'} direction={sortKey==='jobTitle'?sortDir:'asc'} onClick={()=>handleSort('jobTitle')} {...SL}>Job</TableSortLabel></TableCell>
                 <TableCell>Progress</TableCell>
                 <TableCell><TableSortLabel active={sortKey==='currentStageLabel'} direction={sortKey==='currentStageLabel'?sortDir:'asc'} onClick={()=>handleSort('currentStageLabel')} {...SL}>Round / Stage</TableSortLabel></TableCell>
-                <TableCell>Status</TableCell>
                 <TableCell align="right"><TableSortLabel active={sortKey==='atsScore'} direction={sortKey==='atsScore'?sortDir:'asc'} onClick={()=>handleSort('atsScore')} {...SL}>Score</TableSortLabel></TableCell>
                 <TableCell align="center">Action</TableCell>
               </TableRow>
@@ -416,7 +466,7 @@ HireIQ Recruitment Team`
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} sx={{ textAlign: 'center', py: 6, color: '#334155', border: 'none' }}>
+                  <TableCell colSpan={7} sx={{ textAlign: 'center', py: 6, color: '#334155', border: 'none' }}>
                     {all.length === 0 ? 'No candidates in any pipeline — go to Jobs → Hiring Pipeline to add candidates' : 'No candidates match filters'}
                   </TableCell>
                 </TableRow>
@@ -438,9 +488,16 @@ HireIQ Recruitment Team`
                           {r.candidate.name.split(' ').map(w=>w[0]).slice(0,2).join('')}
                         </Avatar>
                         <Box>
-                          <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600, color: '#1E293B', lineHeight: 1.2 }}>
-                            {r.candidate.name}
-                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+                            <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600, color: '#1E293B', lineHeight: 1.2 }}>
+                              {r.candidate.name}
+                            </Typography>
+                            <Chip label={r.currentStageLabel} size="small" sx={{
+                              height: 17, fontSize: '0.55rem', fontWeight: 700,
+                              bgcolor: `${STAGE_COLOR[r.stageType] ?? '#94A3B8'}18`,
+                              color: STAGE_COLOR[r.stageType] ?? '#94A3B8'
+                            }}/>
+                          </Box>
                           {r.candidate.role && (
                             <Typography variant="caption" sx={{ fontSize: '0.62rem', color: '#64748B' }}>{r.candidate.role}</Typography>
                           )}
@@ -453,9 +510,16 @@ HireIQ Recruitment Team`
                     </TableCell>
 
                     <TableCell sx={{ py: 1.25 }}>
-                      <Typography variant="caption" sx={{ fontSize: '0.72rem', color: '#94A3B8', display: 'block', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <Typography sx={{ fontSize: '0.72rem', color: '#334155', fontWeight: 600,
+                        maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {r.jobTitle}
                       </Typography>
+                      {r.jobCode && (
+                        <Typography sx={{ fontSize: '0.6rem', color: '#94A3B8', fontFamily: 'monospace',
+                          maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.jobCode}
+                        </Typography>
+                      )}
                     </TableCell>
 
                     <TableCell sx={{ py: 1.25 }}>
@@ -466,14 +530,6 @@ HireIQ Recruitment Team`
                       <Typography variant="caption" sx={{ fontSize: '0.72rem', color: STAGE_COLOR[r.stageType] ?? '#94A3B8', fontWeight: 600 }}>
                         {r.currentStageLabel}
                       </Typography>
-                    </TableCell>
-
-                    <TableCell sx={{ py: 1.25 }}>
-                      <Chip label={r.stageType.toUpperCase()} size="small" sx={{
-                        height: 18, fontSize: '0.58rem', fontWeight: 700,
-                        bgcolor: `${STAGE_COLOR[r.stageType] ?? '#94A3B8'}20`,
-                        color: STAGE_COLOR[r.stageType] ?? '#94A3B8'
-                      }} />
                     </TableCell>
 
                     <TableCell align="right" sx={{ py: 1.25 }}>
@@ -489,7 +545,7 @@ HireIQ Recruitment Team`
 
                     <TableCell align="center" sx={{ py: 1.25 }}>
                       <Button size="small" variant="outlined" startIcon={<AccountTree sx={{ fontSize: '0.7rem !important' }} />}
-                        onClick={e => { e.stopPropagation(); navigate(`/jobs/${r.jobId}/pipeline`) }}
+                        onClick={e => { e.stopPropagation(); navigate('/pipeline') }}
                         sx={{ fontSize: '0.62rem', py: 0.25, px: 0.75, borderColor: `${ORANGE}55`, color: ORANGE,
                           '&:hover': { bgcolor: `${ORANGE}11`, borderColor: ORANGE } }}>
                         Pipeline
@@ -609,9 +665,15 @@ HireIQ Recruitment Team`
                           {row.candidateName.split(' ').map((w: string) => w[0]).slice(0, 2).join('')}
                         </Avatar>
                         <Box>
-                          <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600, color: '#1E293B', lineHeight: 1.2 }}>
-                            {row.candidateName}
-                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+                            <Typography variant="body2" sx={{ fontSize: '0.78rem', fontWeight: 600, color: '#1E293B', lineHeight: 1.2 }}>
+                              {row.candidateName}
+                            </Typography>
+                            <Chip label="Applied" size="small" sx={{
+                              height: 17, fontSize: '0.55rem', fontWeight: 700,
+                              bgcolor: '#EFF6FF', color: '#2563EB', border: '1px solid #BFDBFE'
+                            }}/>
+                          </Box>
                           {row.currentRole && (
                             <Typography variant="caption" sx={{ fontSize: '0.62rem', color: '#64748B' }}>{row.currentRole}</Typography>
                           )}
@@ -631,9 +693,16 @@ HireIQ Recruitment Team`
                     </TableCell>
 
                     <TableCell sx={{ py: 1.25 }}>
-                      <Typography variant="caption" sx={{ fontSize: '0.72rem', color: '#94A3B8' }}>
+                      <Typography sx={{ fontSize: '0.72rem', color: '#334155', fontWeight: 600,
+                        maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {row.jobTitle}
                       </Typography>
+                      {row.jobCode && (
+                        <Typography sx={{ fontSize: '0.6rem', color: '#94A3B8', fontFamily: 'monospace',
+                          maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {row.jobCode}
+                        </Typography>
+                      )}
                     </TableCell>
 
                     <TableCell sx={{ fontSize: '0.72rem', color: '#94A3B8', py: 1.25 }}>
@@ -667,10 +736,10 @@ HireIQ Recruitment Team`
 
                     <TableCell align="center" sx={{ py: 1.25 }}>
                       <Button size="small" variant="outlined" startIcon={<PersonAddAlt1 sx={{ fontSize: '0.7rem !important' }} />}
-                        onClick={e => { e.stopPropagation(); openShortlist(row) }}
+                        onClick={e => { e.stopPropagation(); addToPipeline(row) }}
                         sx={{ fontSize: '0.62rem', py: 0.25, px: 0.75, borderColor: '#6366F144', color: '#6366F1',
                           '&:hover': { bgcolor: '#6366F111', borderColor: '#6366F1' }, whiteSpace: 'nowrap' }}>
-                        Shortlist
+                        Move To Interview Pipeline
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -716,7 +785,7 @@ HireIQ Recruitment Team`
         <DialogTitle sx={{ fontWeight: 700, fontSize: '1rem', borderBottom: '1px solid #E2E8F0', pb: 1.5 }}>
           <Box display="flex" alignItems="center" gap={1}>
             <PersonAddAlt1 sx={{ color: '#6366F1', fontSize: '1.15rem' }} />
-            Shortlist Candidate
+            Move To Interview Pipeline
           </Box>
         </DialogTitle>
         <DialogContent sx={{ pt: 2.5 }}>
@@ -757,12 +826,12 @@ HireIQ Recruitment Team`
             onClick={() => { if (shortlistTarget) { addToPipeline(shortlistTarget.row); setShortlistTarget(null) } }}
             disabled={shortlistSending}
             sx={{ textTransform: 'none', borderColor: '#CBD5E1', color: '#475569' }}>
-            Shortlist Only
+            Add to Pipeline
           </Button>
           <Button variant="contained" onClick={handleShortlistConfirm} disabled={shortlistSending}
             startIcon={shortlistSending ? <CircularProgress size={14} sx={{ color: '#fff' }} /> : <PersonAddAlt1 />}
             sx={{ bgcolor: '#6366F1', '&:hover': { bgcolor: '#4338CA' }, textTransform: 'none', fontWeight: 700, minWidth: 160 }}>
-            {shortlistSending ? 'Sending...' : 'Shortlist & Send Email'}
+            {shortlistSending ? 'Sending...' : 'Add to Pipeline & Send Email'}
           </Button>
         </DialogActions>
       </Dialog>

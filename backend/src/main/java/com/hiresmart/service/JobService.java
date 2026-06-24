@@ -125,7 +125,8 @@ public class JobService {
                 .salaryMax(jobDTO.getSalaryMax())
                 .salaryCurrency(jobDTO.getSalaryCurrency() != null ? jobDTO.getSalaryCurrency() : "USD")
                 .location(jobDTO.getLocation())
-                .status(Enums.JobStatus.DRAFT)
+                .status(jobDTO.getStatus() != null ? jobDTO.getStatus() : Enums.JobStatus.DRAFT)
+                .postedDate(jobDTO.getStatus() == Enums.JobStatus.OPEN ? LocalDateTime.now() : null)
                 .build();
 
         Job savedJob = jobRepository.save(job);
@@ -154,6 +155,14 @@ public class JobService {
         job.setSalaryMin(jobDTO.getSalaryMin());
         job.setSalaryMax(jobDTO.getSalaryMax());
         job.setLocation(jobDTO.getLocation());
+        if (jobDTO.getStatus() != null && jobDTO.getStatus() != job.getStatus()) {
+            if (jobDTO.getStatus() == Enums.JobStatus.OPEN && job.getPostedDate() == null) {
+                job.setPostedDate(LocalDateTime.now());
+            } else if (jobDTO.getStatus() == Enums.JobStatus.DRAFT) {
+                job.setPostedDate(null);
+            }
+            job.setStatus(jobDTO.getStatus());
+        }
 
         Job updatedJob = jobRepository.save(job);
         log.info("Job updated successfully: {}", jobId);

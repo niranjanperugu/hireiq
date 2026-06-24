@@ -93,13 +93,24 @@ public interface ResumeAnalysisRepository extends JpaRepository<ResumeAnalysis, 
     long countByJobId(String jobId);
 
     /**
+     * Duplicate detection: same candidate (by email, case-insensitive) already submitted for this job
+     */
+    boolean existsByOrganizationIdAndEmailIgnoreCaseAndJobId(String organizationId, String email, String jobId);
+
+    /**
      * Find applied candidates for a specific job (no org check — job is already trusted)
      */
     List<ResumeAnalysis> findByJobIdAndIsApplied(String jobId, boolean isApplied);
 
     /**
-     * Find all applied candidates across an org
+     * Find all applied candidates across an org — single query, no N+1
      */
     @Query("SELECT ra FROM ResumeAnalysis ra WHERE ra.organizationId = :orgId AND ra.isApplied = true ORDER BY ra.analyzedAt DESC")
     List<ResumeAnalysis> findAppliedByOrganization(@Param("orgId") String organizationId);
+
+    /**
+     * Find all analyses (applied or not) across an org, ordered by score desc
+     */
+    @Query("SELECT ra FROM ResumeAnalysis ra WHERE ra.organizationId = :orgId ORDER BY ra.atsScore DESC")
+    List<ResumeAnalysis> findAllByOrganization(@Param("orgId") String organizationId);
 }

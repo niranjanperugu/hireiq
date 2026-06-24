@@ -39,7 +39,8 @@ import {
   EventNote as EvalIcon,
   Schedule as ScheduleIcon,
   ManageSearch as AnalysisIcon,
-  PersonSearch as PersonSearchIcon
+  PersonSearch as PersonSearchIcon,
+  IntegrationInstructions as IntegrationIcon
 } from '@mui/icons-material'
 import { useNavigate, useLocation } from 'react-router-dom'
 
@@ -83,14 +84,13 @@ const Layout: React.FC = () => {
         { label: 'Jobs',               icon: <JobsIcon />,         path: '/jobs' },
         { label: 'Candidates',         icon: <CandidatesIcon />,   path: '/candidates' },
         { label: 'Resume Analysis',    icon: <AnalysisIcon />,     path: '/analysis' },
-        { label: 'Assign Panel',       icon: <PipelineIcon />,     path: '/assign-panel' },
-        { label: 'Schedule Interviews',icon: <ScheduleIcon />,     path: '/schedule' },
+        { label: 'Pipeline',            icon: <PipelineIcon />,     path: '/pipeline' },
       ]
     },
     {
       title: 'Panel Member',
       items: [
-        { label: 'My Calendar',    icon: <CalendarIcon />,  path: '/calendar' },
+        { label: 'Calendar',       icon: <CalendarIcon />,  path: '/calendar' },
         { label: 'Evaluations',    icon: <EvalIcon />,      path: '/evaluations' },
       ]
     },
@@ -103,8 +103,9 @@ const Layout: React.FC = () => {
     {
       title: 'Configuration',
       items: [
-        { label: 'Source Candidates',  icon: <PersonSearchIcon />, path: '/sourcing' },
-        { label: 'Settings',           icon: <SettingsIcon />,     path: '/settings' },
+        { label: 'Source Candidates',  icon: <PersonSearchIcon />,  path: '/sourcing' },
+        { label: 'Integrations',       icon: <IntegrationIcon />,   path: '/integrations' },
+        { label: 'Settings',           icon: <SettingsIcon />,      path: '/settings' },
       ]
     }
   ]

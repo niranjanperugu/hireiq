@@ -1,0 +1,311 @@
+erDiagram
+    organizations {
+        UUID id PK
+        string name UK
+        string email
+        string industry
+        string company_size
+    }
+    departments {
+        UUID id PK
+        UUID org_id FK
+        UUID head_user_id FK
+        string name
+    }
+    users {
+        UUID id PK
+        UUID org_id FK
+        UUID department_id FK
+        string email
+        string first_name
+        string last_name
+        enum role
+        bool is_active
+    }
+    jobs {
+        UUID id PK
+        UUID org_id FK
+        UUID department_id FK
+        UUID created_by_user_id FK
+        string title
+        string job_code UK
+        enum status
+        enum employment_type
+        enum work_mode
+        int min_experience_years
+        int max_experience_years
+        decimal salary_min
+        decimal salary_max
+    }
+    job_requirements {
+        UUID id PK
+        UUID job_id FK
+        enum requirement_type
+        string requirement_value
+        bool is_mandatory
+    }
+    candidates {
+        UUID id PK
+        UUID org_id FK
+        string email
+        string first_name
+        string last_name
+        string phone
+        string current_company
+        string current_designation
+        int total_experience_years
+    }
+    candidate_skills {
+        UUID id PK
+        UUID candidate_id FK
+        string skill_name
+        enum skill_level
+        int years_of_experience
+        bool is_primary
+    }
+    candidate_experience {
+        UUID id PK
+        UUID candidate_id FK
+        string company_name
+        string job_title
+        date start_date
+        date end_date
+        bool is_current
+    }
+    candidate_education {
+        UUID id PK
+        UUID candidate_id FK
+        string institution_name
+        string degree
+        string field_of_study
+    }
+    candidate_certifications {
+        UUID id PK
+        UUID candidate_id FK
+        string certification_name
+        string issuing_organization
+        date issue_date
+        date expiry_date
+    }
+    resume_metadata {
+        UUID id PK
+        UUID candidate_id FK
+        string file_name
+        string file_url
+        enum parsing_status
+        bool is_current
+    }
+    resume_analysis {
+        string id PK
+        string organization_id
+        string job_id
+        string job_title
+        string candidate_name
+        string email
+        double ats_score
+        enum rating
+        bool is_applied
+        string source
+        text full_analysis_json
+        string hiring_recommendation
+    }
+    applications {
+        UUID id PK
+        UUID org_id FK
+        UUID candidate_id FK
+        UUID job_id FK
+        UUID shortlisted_by_user_id FK
+        enum status
+        double similarity_score
+        bool is_shortlisted
+        text recruiter_notes
+    }
+    similarity_scores {
+        UUID id PK
+        UUID application_id FK
+        double skill_match_pct
+        double experience_match_pct
+        double overall_score
+    }
+    workflow_states {
+        UUID id PK
+        UUID org_id FK
+        UUID application_id FK
+        UUID transitioned_by FK
+        enum from_status
+        enum to_status
+        string reason
+        ts transitioned_at
+    }
+    hiring_decisions {
+        UUID id PK
+        UUID application_id FK
+        UUID decided_by_user_id FK
+        string decision
+        text decision_notes
+        ts decided_at
+    }
+    interview_rounds {
+        UUID id PK
+        UUID org_id FK
+        string name
+        int sequence_number
+        enum interview_type
+        int estimated_duration_mins
+    }
+    interview_panels {
+        UUID id PK
+        UUID org_id FK
+        UUID job_id FK
+        UUID created_by_user_id FK
+        string name
+    }
+    interview_panel_members {
+        UUID id PK
+        UUID panel_id FK
+        UUID user_id FK
+        string role
+    }
+    interview_sessions {
+        UUID id PK
+        UUID org_id FK
+        UUID application_id FK
+        UUID panel_id FK
+        UUID round_id FK
+        ts scheduled_at
+        enum status
+        string meeting_link
+    }
+    interview_questions {
+        UUID id PK
+        UUID org_id FK
+        UUID created_by_user_id FK
+        enum interview_type
+        string skill_tag
+        text question_text
+        bool ai_generated
+    }
+    interview_session_questions {
+        UUID id PK
+        UUID interview_session_id FK
+        UUID question_id FK
+        int sequence_number
+        text candidate_answer
+    }
+    feedback_forms {
+        UUID id PK
+        UUID interview_session_id FK
+        UUID evaluator_user_id FK
+        enum overall_rating
+        int technical_rating
+        int communication_rating
+        int cultural_fit_rating
+        string recommendation
+    }
+    evaluation_criteria {
+        UUID id PK
+        UUID org_id FK
+        enum interview_type
+        string criteria_name
+        int max_score
+        int weight_pct
+    }
+    calendar_integrations {
+        UUID id PK
+        UUID user_id FK
+        string provider
+        bool is_active
+    }
+    interview_availability {
+        UUID id PK
+        UUID user_id FK
+        date date_from
+        date date_to
+        time start_time
+        time end_time
+    }
+    notifications {
+        UUID id PK
+        UUID recipient_user_id FK
+        enum notification_type
+        string title
+        bool is_read
+    }
+    audit_logs {
+        UUID id PK
+        UUID org_id FK
+        UUID user_id FK
+        string action
+        string entity_type
+        jsonb old_values
+        jsonb new_values
+    }
+    email_logs {
+        UUID id PK
+        string recipient_email
+        enum notification_type
+        string subject
+        enum delivery_status
+        ts sent_at
+    }
+    event_logs {
+        UUID id PK
+        UUID org_id FK
+        string event_type
+        string entity_type
+        jsonb event_data
+    }
+    shortlist_records {
+        string id PK
+        string resume_analysis_id
+        string job_id
+        string organization_id
+        string candidate_email
+        enum method
+        double ats_score
+        ts shortlisted_at
+    }
+
+    organizations ||--o{ departments : "has"
+    organizations ||--o{ users : "has"
+    organizations ||--o{ jobs : "posts"
+    organizations ||--o{ candidates : "tracks"
+    organizations ||--o{ applications : "owns"
+    organizations ||--o{ interview_rounds : "defines"
+    organizations ||--o{ interview_panels : "has"
+    organizations ||--o{ interview_questions : "has"
+    organizations ||--o{ evaluation_criteria : "defines"
+    organizations ||--o{ workflow_states : "logs"
+    organizations ||--o{ audit_logs : "logs"
+    organizations ||--o{ event_logs : "logs"
+    departments ||--o{ jobs : "has"
+    departments ||--o{ users : "contains"
+    users ||--o{ jobs : "creates"
+    users ||--o{ interview_panels : "creates"
+    users ||--o{ interview_questions : "creates"
+    users ||--o{ interview_panel_members : "joins"
+    users ||--o{ calendar_integrations : "has"
+    users ||--o{ interview_availability : "sets"
+    users ||--o{ notifications : "receives"
+    users ||--o{ hiring_decisions : "makes"
+    users ||--o{ workflow_states : "triggers"
+    users ||--o{ audit_logs : "generates"
+    jobs ||--o{ job_requirements : "has"
+    jobs ||--o{ applications : "receives"
+    jobs ||--o{ interview_panels : "has"
+    candidates ||--o{ candidate_skills : "has"
+    candidates ||--o{ candidate_experience : "has"
+    candidates ||--o{ candidate_education : "has"
+    candidates ||--o{ candidate_certifications : "has"
+    candidates ||--o{ resume_metadata : "has"
+    candidates ||--o{ applications : "submits"
+    applications ||--|| similarity_scores : "scored-by"
+    applications ||--|| hiring_decisions : "results-in"
+    applications ||--o{ workflow_states : "transitions"
+    applications ||--o{ interview_sessions : "has"
+    interview_panels ||--o{ interview_panel_members : "has"
+    interview_panels ||--o{ interview_sessions : "hosts"
+    interview_rounds ||--o{ interview_sessions : "structures"
+    interview_sessions ||--|| feedback_forms : "produces"
+    interview_sessions ||--o{ interview_session_questions : "uses"
+    interview_questions ||--o{ interview_session_questions : "used-in"

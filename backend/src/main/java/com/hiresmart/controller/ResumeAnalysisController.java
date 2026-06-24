@@ -239,6 +239,81 @@ public class ResumeAnalysisController {
     }
 
     /**
+     * Get ALL applied candidates for an organization in a single query.
+     * Each row is one application (job+candidate pair).  Each row also carries
+     * otherApplications — the count of other jobs the same email applied for,
+     * so the UI can show "also applied to N other jobs" without extra calls.
+     *
+     * GET /api/v1/resume-analysis/org/{organizationId}/applied
+     */
+    @GetMapping("/org/{organizationId}/applied")
+    public ResponseEntity<?> getAllAppliedForOrg(
+        @PathVariable String organizationId
+    ) {
+        try {
+            List<ResumeAnalysis> all = repository.findAppliedByOrganization(organizationId);
+
+            // Build a count map: email (lower) -> number of applications
+            java.util.Map<String, Long> countByEmail = all.stream()
+                .filter(ra -> ra.getEmail() != null)
+                .collect(java.util.stream.Collectors.groupingBy(
+                    ra -> ra.getEmail().toLowerCase(),
+                    java.util.stream.Collectors.counting()
+                ));
+
+            // Build a job-titles map: email -> list of other job titles
+            java.util.Map<String, List<String>> jobsByEmail = all.stream()
+                .filter(ra -> ra.getEmail() != null)
+                .collect(java.util.stream.Collectors.groupingBy(
+                    ra -> ra.getEmail().toLowerCase(),
+                    java.util.stream.Collectors.mapping(ResumeAnalysis::getJobTitle,
+                        java.util.stream.Collectors.toList())
+                ));
+
+            List<java.util.Map<String, Object>> rows = all.stream().map(ra -> {
+                ResumeAnalysisDTO dto = ResumeAnalysisDTO.fromEntity(ra, objectMapper);
+                java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                row.put("id",                 dto.getId());
+                row.put("candidateName",      dto.getCandidateName());
+                row.put("currentRole",        dto.getCurrentRole());
+                row.put("email",              dto.getEmail());
+                row.put("phone",              dto.getPhone());
+                row.put("atsScore",           dto.getAtsScore());
+                row.put("matchedSkills",      dto.getMatchedSkills());
+                row.put("missingSkills",      dto.getMissingSkills());
+                row.put("yearsOfExperience",  dto.getYearsOfExperience());
+                row.put("education",          dto.getEducation());
+                row.put("professionalSummary",dto.getProfessionalSummary());
+                row.put("resumeFileName",     dto.getResumeFileName());
+                row.put("resumeS3Url",        dto.getResumeS3Url());
+                row.put("rating",             dto.getRating());
+                row.put("analyzedAt",         dto.getAnalyzedAt());
+                row.put("jobId",              dto.getJobId());
+                row.put("jobTitle",           dto.getJobTitle());
+                row.put("isApplied",          dto.isApplied());
+                row.put("source",             dto.getSource());
+                // Enriched: how many jobs this candidate applied for + which ones
+                String emailKey = ra.getEmail() != null ? ra.getEmail().toLowerCase() : "";
+                long totalApps = countByEmail.getOrDefault(emailKey, 1L);
+                row.put("totalApplications",  totalApps);
+                row.put("otherApplications",  totalApps - 1);
+                List<String> allJobs = jobsByEmail.getOrDefault(emailKey, List.of());
+                row.put("appliedJobTitles",   allJobs);
+                return row;
+            }).toList();
+
+            return ResponseEntity.ok(java.util.Map.of(
+                "data",              rows,
+                "total",             rows.size(),
+                "uniqueCandidates",  countByEmail.size()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(java.util.Map.of("error", e.getMessage() != null ? e.getMessage() : "Internal error"));
+        }
+    }
+
+    /**
      * Download resume from S3
      * GET /api/v1/resume-analysis/{analysisId}/download
      */

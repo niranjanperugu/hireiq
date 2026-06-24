@@ -11,16 +11,17 @@ import CandidateDetailPage  from '@pages/candidates/CandidateDetailPage'
 import JobsPage             from '@pages/jobs/JobsPage'
 import JobDetailPage        from '@pages/jobs/JobDetailPage'
 import JobPipelinePage      from '@pages/pipeline/JobPipelinePage'
+import AllPipelinePage      from '@pages/pipeline/AllPipelinePage'
 import ApplicationsPage     from '@pages/applications/ApplicationsPage'
 import AnalyticsPage        from '@pages/analytics/AnalyticsPage'
 import JobAnalysisPage      from '@pages/analysis/JobAnalysisPage'
 import SchedulePage         from '@pages/schedule/SchedulePage'
-import AssignPanelPage      from '@pages/panel/AssignPanelPage'
 import EvaluationsListPage  from '@pages/evaluations/EvaluationsListPage'
 import PanelCalendarPage    from '@pages/calendar/PanelCalendarPage'
 import JobApplyPage         from '@pages/apply/JobApplyPage'
 import SettingsPage         from '@pages/settings/SettingsPage'
 import SourcingPage         from '@pages/sourcing/SourcingPage'
+import IntegrationsPage     from '@pages/integrations/IntegrationsPage'
 
 function App() {
   const { isAuthenticated } = useAppSelector(state => state.auth)
@@ -54,14 +55,16 @@ function App() {
 
         {/* HR workflow routes */}
         <Route path="analysis"      element={<JobAnalysisPage />} />
-        <Route path="assign-panel" element={<AssignPanelPage />} />
+        <Route path="pipeline"      element={<AllPipelinePage />} />
+        <Route path="assign-panel" element={<Navigate to="/pipeline" replace />} />
         <Route path="schedule"     element={<SchedulePage />} />
         <Route path="evaluations" element={<EvaluationsListPage />} />
         <Route path="calendar"    element={<PanelCalendarPage />} />
         <Route path="applications" element={<ApplicationsPage />} />
         <Route path="analytics"   element={<AnalyticsPage />} />
-        <Route path="settings"    element={<SettingsPage />} />
-        <Route path="sourcing"    element={<SourcingPage />} />
+        <Route path="settings"      element={<SettingsPage />} />
+        <Route path="sourcing"      element={<SourcingPage />} />
+        <Route path="integrations"  element={<IntegrationsPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

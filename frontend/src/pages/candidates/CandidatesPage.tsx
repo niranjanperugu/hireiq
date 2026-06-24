@@ -53,7 +53,10 @@ interface AppliedCandidate {
   resumeFileName: string
   analyzedAt: string | null
   jobId: string
+  jobCode?: string
   jobTitle: string
+  totalApplications?: number
+  appliedJobTitles?: string[]
 }
 
 type CandidateStatus = 'APPLIED' | 'IN_PIPELINE' | 'ON_HOLD' | 'REJECTED'
@@ -303,7 +306,17 @@ const EditCandidateModal: React.FC<EditModalProps> = ({
               </Typography>
 
               {/* Shortlist / Move */}
-              <Box onClick={() => setView('pick_stage')}
+              <Box onClick={() => {
+                  if (candidate.status === 'IN_PIPELINE') {
+                    setView('pick_stage')
+                  } else {
+                    // Directly move to first pipeline stage without showing picker
+                    const pl     = loadPipeline(candidate.jobId)
+                    const stages = pl.stages.length ? pl.stages : DEFAULT_STAGES
+                    const first  = stages[0]
+                    if (first) onAction('move', first.id, first.label)
+                  }
+                }}
                 sx={{ display:'flex', alignItems:'center', gap:2, p:2, mb:1.5,
                   borderRadius:2, border:`1px solid ${BORDER}`, bgcolor:CARD, cursor:'pointer',
                   '&:hover':{ borderColor:'#38BDF8', bgcolor:'#38BDF808' } }}>
@@ -313,7 +326,7 @@ const EditCandidateModal: React.FC<EditModalProps> = ({
                 </Box>
                 <Box flex={1}>
                   <Typography sx={{ fontWeight:700, color:TEXT1, fontSize:'0.88rem' }}>
-                    {candidate.status === 'IN_PIPELINE' ? 'Move to Another Stage' : 'Shortlist & Add to Pipeline'}
+                    {candidate.status === 'IN_PIPELINE' ? 'Move to Another Stage' : 'Move To Interview Pipeline'}
                   </Typography>
                   <Typography sx={{ fontSize:'0.72rem', color:TEXT2 }}>
                     {candidate.status === 'IN_PIPELINE'
@@ -489,38 +502,33 @@ const CandidatesPage: React.FC = () => {
   const [deleteTarget,setDeleteTarget]= useState<EnrichedCandidate | null>(null)
   const [deleting,    setDeleting]    = useState(false)
 
-  // Fetch jobs
+  // Fetch candidates — single org-level call, no N+1
+  const fetchAll = useCallback(async () => {
+    if (!organizationId) return
+    setLoading(true)
+    try {
+      const archived = loadSet(ARCHIVE_KEY)
+      const res = await apiClient.get(`/resume-analysis/org/${organizationId}/applied`)
+      const rows: AppliedCandidate[] = (res.data?.data ?? [])
+        .filter((d: any) => !archived.has(`${d.jobId}_${d.id}`))
+      setCandidates(rows)
+    } catch { /* silent */ } finally { setLoading(false) }
+  }, [organizationId])
+
   useEffect(() => {
     if (organizationId) dispatch(fetchJobs({ organizationId, page:0, size:100 }))
   }, [organizationId, dispatch])
 
-  // Fetch candidates across all jobs
-  const fetchAll = useCallback(async () => {
-    if (!jobs.length) return
-    setLoading(true)
-    try {
-      const archived = loadSet(ARCHIVE_KEY)
-      const results  = await Promise.allSettled(
-        jobs.map(j =>
-          apiClient.get<AppliedCandidate[]>(`/resume-analysis/job/${j.id}/applied`)
-            .then(r => (r.data ?? [])
-              .filter(d => !archived.has(`${j.id}_${d.id}`))
-              .map(d => ({ ...d, jobId:String(j.id), jobTitle:j.title }))
-            )
-        )
-      )
-      const rows: AppliedCandidate[] = []
-      results.forEach(r => { if (r.status === 'fulfilled') rows.push(...r.value) })
-      setCandidates(rows)
-    } catch { /* silent */ } finally { setLoading(false) }
-  }, [jobs])
-
   useEffect(() => { fetchAll() }, [fetchAll, version])
 
-  // Enrich with status
+  // Enrich with status + jobCode from Redux jobs list
   const enriched: EnrichedCandidate[] = useMemo(
-    () => candidates.map(c => ({ ...c, ...getStatus(c) })),
-    [candidates, version]
+    () => candidates.map(c => ({
+      ...c,
+      jobCode: c.jobCode ?? jobs.find(j => String(j.id) === c.jobId)?.jobCode,
+      ...getStatus(c),
+    })),
+    [candidates, jobs, version]
   )
 
   // Job options for filter
@@ -785,9 +793,18 @@ const CandidatesPage: React.FC = () => {
                           {c.candidateName.split(' ').map(w=>w[0]).slice(0,2).join('')}
                         </Avatar>
                         <Box>
-                          <Typography sx={{ fontSize:'0.82rem', fontWeight:700, color:TEXT1, lineHeight:1.2 }}>
-                            {c.candidateName}
-                          </Typography>
+                          <Box display="flex" alignItems="center" gap={0.75}>
+                            <Typography sx={{ fontSize:'0.82rem', fontWeight:700, color:TEXT1, lineHeight:1.2 }}>
+                              {c.candidateName}
+                            </Typography>
+                            {(c.totalApplications ?? 1) > 1 && (
+                              <Tooltip title={`Applied to ${c.totalApplications} jobs: ${(c.appliedJobTitles ?? []).join(', ')}`} arrow>
+                                <Chip label={`${c.totalApplications} jobs`} size="small"
+                                  sx={{ height:16, fontSize:'0.58rem', fontWeight:700, cursor:'help',
+                                    bgcolor:'#EFF6FF', color:'#1D4ED8', border:'1px solid #BFDBFE' }} />
+                              </Tooltip>
+                            )}
+                          </Box>
                           <Typography sx={{ fontSize:'0.65rem', color:TEXT3 }}>{c.email}</Typography>
                           {c.currentRole && (
                             <Typography sx={{ fontSize:'0.65rem', color:TEXT2 }}>{c.currentRole}</Typography>
@@ -798,12 +815,20 @@ const CandidatesPage: React.FC = () => {
 
                     {/* Job */}
                     <TableCell sx={{ py:1.5 }}>
-                      <Box sx={{ display:'flex', alignItems:'center', gap:0.75 }}>
-                        <Work sx={{ fontSize:13, color:TEXT3, flexShrink:0 }}/>
-                        <Typography sx={{ fontSize:'0.72rem', color:TEXT2, maxWidth:150,
-                          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                          {c.jobTitle}
-                        </Typography>
+                      <Box sx={{ display:'flex', alignItems:'flex-start', gap:0.75 }}>
+                        <Work sx={{ fontSize:13, color:TEXT3, flexShrink:0, mt:0.2 }}/>
+                        <Box>
+                          <Typography sx={{ fontSize:'0.72rem', color:TEXT1, fontWeight:600,
+                            maxWidth:150, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                            {c.jobTitle}
+                          </Typography>
+                          {c.jobCode && (
+                            <Typography sx={{ fontSize:'0.6rem', color:TEXT3, fontFamily:'monospace',
+                              maxWidth:150, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                              {c.jobCode}
+                            </Typography>
+                          )}
+                        </Box>
                       </Box>
                     </TableCell>
 

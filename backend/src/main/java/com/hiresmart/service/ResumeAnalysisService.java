@@ -102,6 +102,27 @@ public class ResumeAnalysisService {
                     nlpData = null;
                 }
 
+                // Duplicate detection: skip analysis if email+jobId already exists
+                if (nlpData != null && nlpData.getEmail() != null && !nlpData.getEmail().isBlank()) {
+                    if (repository.existsByOrganizationIdAndEmailIgnoreCaseAndJobId(
+                            organizationId, nlpData.getEmail(), jobId)) {
+                        log.info("Duplicate resume rejected: email={}, jobId={}", nlpData.getEmail(), jobId);
+                        results.add(ResumeAnalysisDTO.builder()
+                            .candidateName(nlpData.getCandidateName() != null
+                                ? nlpData.getCandidateName() : file.getOriginalFilename())
+                            .email(nlpData.getEmail())
+                            .jobId(jobId)
+                            .jobTitle(jobTitle)
+                            .isDuplicate(true)
+                            .rating("DUPLICATE")
+                            .atsScore(0.0)
+                            .matchedSkills(List.of())
+                            .missingSkills(List.of())
+                            .build());
+                        continue;
+                    }
+                }
+
                 // Step 3: AI analysis with NLP hints, fallback to rule-based
                 String filenameFallbackName = nlpPreprocessor.nameFromFilename(filename);
                 ResumeData resumeData;
@@ -151,6 +172,13 @@ public class ResumeAnalysisService {
                     .analyzedAt(LocalDateTime.now())
                     .isApplied(isApplied)
                     .source(isApplied ? "PUBLIC_APPLY" : "HR_ANALYZED")
+                    .projectsJson(toJsonObject(resumeData.getProjects()))
+                    .scoreBreakdownJson(toJsonObject(resumeData.getScoreBreakdown()))
+                    .keyStrengthsJson(toJson(resumeData.getKeyStrengths()))
+                    .areasForImprovementJson(toJson(resumeData.getAreasForImprovement()))
+                    .hiringRecommendation(resumeData.getHiringRecommendation())
+                    .jdAlignment(resumeData.getJdAlignment())
+                    .fullAnalysisJson(toJsonObject(resumeData.getFullAnalysis()))
                     .build();
 
                 ResumeAnalysis saved = repository.save(analysis);
@@ -204,14 +232,22 @@ public class ResumeAnalysisService {
                                                 String resumeText) {
         ResumeData data = new ResumeData();
 
-        // Name priority: valid NLP name → valid AI name → filename → "Unknown"
-        String aiName  = stringVal(ai, "candidateName", null);
+        log.info("Claude response keys: {}", ai.keySet());
+        log.info("Claude overall_score={}, recommendation={}, recruiter_summary_len={}",
+            ai.get("overall_score"), ai.get("recommendation"),
+            ai.get("recruiter_summary") != null ? ai.get("recruiter_summary").toString().length() : 0);
+
+        // Pull candidate_info sub-object
+        Map<String, Object> candidateInfo = mapVal(ai, "candidate_info");
+
+        // ── Candidate identity — Claude is primary, NLP fills truly-empty gaps ──
+        String aiName  = stringVal(candidateInfo, "name", stringVal(ai, "candidateName", null));
         String nlpName = nlp != null ? nlp.getCandidateName() : null;
         String name;
-        if (isValidPersonName(nlpName)) {
-            name = normalizeNameCase(nlpName);
-        } else if (isValidPersonName(aiName)) {
+        if (isValidPersonName(aiName)) {
             name = normalizeNameCase(aiName);
+        } else if (isValidPersonName(nlpName)) {
+            name = normalizeNameCase(nlpName);
         } else if (filenameName != null && isValidPersonName(filenameName)) {
             name = filenameName;
         } else {
@@ -219,58 +255,67 @@ public class ResumeAnalysisService {
         }
         data.setCandidateName(name);
 
-        data.setCurrentRole(firstNonNull(stringVal(ai, "currentRole", null),
-            nlp != null ? nlp.getCurrentRole() : null));
-        data.setEmail(firstNonNull(stringVal(ai, "email", null),
-            nlp != null ? nlp.getEmail() : null));
-        data.setPhone(firstNonNull(stringVal(ai, "phone", null),
-            nlp != null ? nlp.getPhone() : null));
+        // All contact/role fields: Claude first, NLP as last-resort backup only
+        String aiRole  = stringVal(candidateInfo, "current_title", null);
+        String aiEmail = stringVal(candidateInfo, "email", null);
+        String aiPhone = stringVal(candidateInfo, "phone", null);
+        data.setCurrentRole(aiRole  != null ? aiRole  : (nlp != null ? nlp.getCurrentRole() : null));
+        data.setEmail      (aiEmail != null ? aiEmail : (nlp != null ? nlp.getEmail()        : null));
+        data.setPhone      (aiPhone != null ? aiPhone : (nlp != null ? nlp.getPhone()        : null));
 
-        // Take the best (highest credible) experience from AI and NLP
-        // AI may undercount due to 4000-char context truncation; NLP may overcount due to overlaps
-        // Taking max avoids the undercount failure mode; cap at 50 to reject garbage
-        int aiExp = intVal(ai, "yearsOfExperience", 0);
+        int aiExp  = intVal(candidateInfo, "years_of_experience",
+                        intVal(mapVal(ai, "experience_match"), "candidate_years", 0));
         int nlpExp = (nlp != null && nlp.getYearsOfExperience() != null) ? nlp.getYearsOfExperience() : 0;
-        data.setYearsOfExperience(Math.min(Math.max(aiExp, nlpExp), 50));
+        data.setYearsOfExperience(aiExp > 0 ? Math.min(aiExp, 50) : Math.min(nlpExp, 50));
 
-        data.setEducation(firstNonNull(stringVal(ai, "education", null),
-            nlp != null ? nlp.getEducation() : null, "High School"));
-        // Use AI summary when it's substantive; otherwise build from resume text + NLP entities
-        String aiSummary = stringVal(ai, "professionalSummary", "");
-        data.setProfessionalSummary(
-            (aiSummary != null && aiSummary.length() > 60)
-                ? aiSummary
-                : buildProfessionalSummary(resumeText, nlp));
+        String aiEdu = stringVal(candidateInfo, "education", null);
+        data.setEducation(aiEdu != null ? aiEdu : (nlp != null ? nlp.getEducation() : "High School"));
 
-        // Merge AI skills + NLP skills for comprehensive list
-        List<String> aiSkills = new ArrayList<>(listVal(ai, "skills"));
-        if (nlp != null && nlp.getExtractedSkills() != null) {
-            nlp.getExtractedSkills().stream()
-                .filter(s -> aiSkills.stream().noneMatch(a -> a.equalsIgnoreCase(s)))
-                .forEach(aiSkills::add);
-        }
+        // ── Professional summary: ALWAYS use Claude's recruiter_summary ──────────
+        // NLP fallback is only used if Claude is completely disabled (parseResumeFallback path)
+        String recruiterSummary = stringVal(ai, "recruiter_summary", null);
+        data.setProfessionalSummary(recruiterSummary);
+
+        // ── Skills: ALL from Claude, NLP only adds any skills Claude missed ──────
+        List<String> rawAiSkills = new ArrayList<>(listVal(candidateInfo, "all_skills"));
+        if (rawAiSkills.isEmpty()) rawAiSkills = new ArrayList<>(listVal(ai, "skills"));
+        final List<String> aiSkills = rawAiSkills;
         data.setSkills(aiSkills);
-        data.setMatchedSkills(listVal(ai, "matchedSkills"));
-        data.setMissingSkills(listVal(ai, "missingSkills"));
 
-        // Recompute matched/missing using merged skill set if AI left them incomplete
-        if (data.getMatchedSkills().isEmpty() && !requiredSkills.isEmpty()) {
-            List<String> matched = requiredSkills.stream()
-                .filter(req -> aiSkills.stream().anyMatch(s -> s.equalsIgnoreCase(req))
-                    || (nlp != null && nlp.getExtractedSkills() != null
-                        && nlp.getExtractedSkills().stream().anyMatch(s -> s.equalsIgnoreCase(req))))
-                .toList();
-            data.setMatchedSkills(matched);
-        }
-        if (data.getMissingSkills().isEmpty() && !requiredSkills.isEmpty()) {
-            List<String> matched = data.getMatchedSkills();
-            data.setMissingSkills(requiredSkills.stream()
-                .filter(req -> matched.stream().noneMatch(m -> m.equalsIgnoreCase(req)))
-                .toList());
-        }
+        // ── Matched/missing: ALWAYS from Claude's required_skills_match ──────────
+        Map<String, Object> skillsMatch = mapVal(ai, "required_skills_match");
+        data.setMatchedSkills(new ArrayList<>(listVal(skillsMatch, "matched_skills")));
+        data.setMissingSkills(new ArrayList<>(listVal(skillsMatch, "missing_skills")));
 
-        double rawScore = doubleVal(ai, "atsScore", -1.0);
+        // ── ATS score from Claude's overall_score ────────────────────────────────
+        double rawScore = doubleVal(ai, "overall_score", -1.0);
         data.setAtsScore(rawScore >= 0 ? Math.min(rawScore, 100.0) : 50.0);
+
+        // ── Rich analysis fields ─────────────────────────────────────────────────
+        data.setKeyStrengths(listVal(ai, "top_strengths"));
+        data.setAreasForImprovement(listVal(ai, "high_priority_gaps"));
+        data.setHiringRecommendation(stringVal(ai, "recommendation", null));
+        data.setJdAlignment(stringVal(ai, "hiring_manager_summary", null));
+
+        // ── Component score snapshot ─────────────────────────────────────────────
+        Map<String, Object> breakdown = new java.util.HashMap<>();
+        breakdown.put("jdMatch",        doubleVal(mapVal(ai, "job_description_match"), "score", 0));
+        breakdown.put("skillsMatch",    doubleVal(skillsMatch, "score", 0));
+        breakdown.put("experience",     doubleVal(mapVal(ai, "experience_match"), "score", 0));
+        breakdown.put("jobTitle",       doubleVal(mapVal(ai, "job_title_match"), "score", 0));
+        breakdown.put("location",       doubleVal(mapVal(ai, "location_match"), "score", 0));
+        breakdown.put("seniority",      doubleVal(mapVal(ai, "seniority_match"), "score", 0));
+        breakdown.put("achievements",   doubleVal(mapVal(ai, "achievement_impact"), "score", 0));
+        breakdown.put("education",      doubleVal(mapVal(ai, "education_certifications"), "score", 0));
+        breakdown.put("atsReadability", doubleVal(mapVal(ai, "ats_readability"), "score", 0));
+        breakdown.put("total", data.getAtsScore());
+        data.setScoreBreakdown(breakdown);
+
+        // ── Full Claude JSON stored verbatim for frontend rich view ───────────────
+        data.setFullAnalysis(ai);
+        log.info("fullAnalysis set with {} keys; jdMatch score={}",
+            ai.size(), doubleVal(mapVal(ai, "job_description_match"), "score", -1));
+
         return data;
     }
 
@@ -585,11 +630,37 @@ public class ResumeAnalysisService {
         }
     }
 
+    private String toJsonObject(Object obj) {
+        if (obj == null) return null;
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (Exception e) {
+            log.error("JSON serialization failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private List<String> listVal(Map<String, Object> map, String key) {
         Object val = map.get(key);
         if (val instanceof List) return (List<String>) val;
         return new ArrayList<>();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> listOfMaps(Map<String, Object> map, String key) {
+        Object val = map.get(key);
+        if (val instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Map) {
+            return (List<Map<String, Object>>) val;
+        }
+        return new ArrayList<>();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapVal(Map<String, Object> map, String key) {
+        Object val = map.get(key);
+        if (val instanceof Map) return (Map<String, Object>) val;
+        return new java.util.HashMap<>();
     }
 
     private String stringVal(Map<String, Object> map, String key, String defaultVal) {
@@ -699,5 +770,12 @@ public class ResumeAnalysisService {
         private List<String> skills = new ArrayList<>();
         private List<String> matchedSkills = new ArrayList<>();
         private List<String> missingSkills = new ArrayList<>();
+        private List<Map<String, Object>> projects = new ArrayList<>();
+        private Map<String, Object> scoreBreakdown = new java.util.HashMap<>();
+        private List<String> keyStrengths = new ArrayList<>();
+        private List<String> areasForImprovement = new ArrayList<>();
+        private String hiringRecommendation;
+        private String jdAlignment;
+        private Map<String, Object> fullAnalysis;
     }
 }

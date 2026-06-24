@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useAppDispatch, useAppSelector } from '@hooks/redux'
-import { fetchJobs, createJob, updateJob, deleteJob, Job } from '@store/jobsSlice'
+import { fetchJobs, createJob, updateJob, deleteJob, publishJob, unpublishJob, Job } from '@store/jobsSlice'
 import {
   Box, Button, TextField, Typography, Chip, CircularProgress,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -12,7 +12,8 @@ import {
 import {
   Add as AddIcon, Visibility as ViewIcon, Edit as EditIcon,
   Delete as DeleteIcon, Download as DownloadIcon, Search as SearchIcon,
-  FilterList as FilterIcon, Star as StarIcon
+  FilterList as FilterIcon, Star as StarIcon,
+  PublishedWithChanges as PublishIcon, Unpublished as UnpublishIcon
 } from '@mui/icons-material'
 import { useNavigate } from 'react-router-dom'
 
@@ -65,7 +66,7 @@ const emptyForm = {
   title: '', description: '', employmentType: 'FULL_TIME', workMode: 'HYBRID',
   location: '', salaryMin: '', salaryMax: '', salaryCurrency: 'USD',
   minExperienceYears: '', maxExperienceYears: '', deadline: '', featured: false,
-  departmentId: ''
+  departmentId: '', status: 'DRAFT'
 }
 
 const JobsPage: React.FC = () => {
@@ -120,7 +121,8 @@ const JobsPage: React.FC = () => {
       maxExperienceYears: String(j.maxExperienceYears ?? ''),
       deadline: j.deadline ? j.deadline.slice(0, 10) : '',
       featured: j.featured ?? false,
-      departmentId: j.departmentId ?? ''
+      departmentId: j.departmentId ?? '',
+      status: j.status ?? 'DRAFT'
     })
     setDialogOpen(true)
   }
@@ -150,6 +152,17 @@ const JobsPage: React.FC = () => {
     } catch {
       setToast({ msg: 'Failed to save job', sev: 'error' })
     } finally { setSaving(false) }
+  }
+
+  const handleTogglePublish = async (j: Job) => {
+    if (!organizationId) return
+    if (j.status === 'OPEN') {
+      await dispatch(unpublishJob({ organizationId, jobId: j.id, currentData: { title: j.title, description: j.description, employmentType: j.employmentType, workMode: j.workMode, location: j.location, salaryMin: j.salaryMin, salaryMax: j.salaryMax, salaryCurrency: j.salaryCurrency, minExperienceYears: j.minExperienceYears, maxExperienceYears: j.maxExperienceYears, deadline: j.deadline, featured: j.featured, departmentId: j.departmentId } }))
+      setToast({ msg: `"${j.title}" moved back to Draft`, sev: 'success' })
+    } else {
+      await dispatch(publishJob({ organizationId, jobId: j.id }))
+      setToast({ msg: `"${j.title}" published successfully`, sev: 'success' })
+    }
   }
 
   const handleDelete = async () => {
@@ -289,8 +302,14 @@ const JobsPage: React.FC = () => {
                         <Tooltip title="Edit"><IconButton size="small" onClick={() => openEdit(j)}
                           sx={{ color: '#F59E0B', '&:hover': { bgcolor: '#FFFBEB' } }}>
                           <EditIcon sx={{ fontSize: '1rem' }} /></IconButton></Tooltip>
+                        <Tooltip title={j.status === 'OPEN' ? 'Move to Draft' : 'Publish'}>
+                          <IconButton size="small" onClick={() => handleTogglePublish(j)}
+                            sx={{ color: j.status === 'OPEN' ? '#94A3B8' : '#22C55E', '&:hover': { bgcolor: j.status === 'OPEN' ? '#F1F5F9' : '#F0FDF4' } }}>
+                            {j.status === 'OPEN' ? <UnpublishIcon sx={{ fontSize: '1rem' }} /> : <PublishIcon sx={{ fontSize: '1rem' }} />}
+                          </IconButton>
+                        </Tooltip>
                         <Tooltip title="Download"><IconButton size="small" onClick={() => handleDownload(j)}
-                          sx={{ color: '#22C55E', '&:hover': { bgcolor: '#F0FDF4' } }}>
+                          sx={{ color: '#6366F1', '&:hover': { bgcolor: '#EEF2FF' } }}>
                           <DownloadIcon sx={{ fontSize: '1rem' }} /></IconButton></Tooltip>
                         <Tooltip title="Delete"><IconButton size="small" onClick={() => setDelJob(j)}
                           sx={{ color: '#EF4444', '&:hover': { bgcolor: '#FFF1F2' } }}>
@@ -366,9 +385,25 @@ const JobsPage: React.FC = () => {
                 {depts.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
               </TextField>
             )}
-            <TextField label="Application Deadline" size="small" fullWidth type="date"
-              value={f.deadline} onChange={e => set('deadline', e.target.value)}
-              InputLabelProps={{ shrink: true }} />
+            <Box display="flex" gap={2}>
+              <TextField label="Application Deadline" size="small" fullWidth type="date"
+                value={f.deadline} onChange={e => set('deadline', e.target.value)}
+                InputLabelProps={{ shrink: true }} />
+              <TextField select label="Status" size="small" fullWidth value={f.status} onChange={e => set('status', e.target.value)}>
+                <MenuItem value="DRAFT">
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#F59E0B' }} />
+                    Draft
+                  </Box>
+                </MenuItem>
+                <MenuItem value="OPEN">
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#22C55E' }} />
+                    Published
+                  </Box>
+                </MenuItem>
+              </TextField>
+            </Box>
             <FormControlLabel control={<Switch checked={f.featured} onChange={e => set('featured', e.target.checked)} size="small" />}
               label={<Typography sx={{ fontSize: '0.85rem' }}>Mark as Featured</Typography>} />
           </Box>

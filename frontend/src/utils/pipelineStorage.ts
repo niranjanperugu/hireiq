@@ -134,7 +134,7 @@ export interface PipelineState {
 }
 
 export const DEFAULT_STAGES: PipelineStage[] = [
-  { id: 'shortlisted',  label: 'Shortlisted',        color: '#2563EB', type: 'shortlist' },
+  { id: 'shortlisted',  label: 'Interviewing',        color: '#2563EB', type: 'shortlist' },
   { id: 'round_1',      label: 'Round 1 - Technical', color: '#7C3AED', type: 'round', roundNumber: 1 },
   { id: 'round_2',      label: 'Round 2 - HR',        color: '#DB2777', type: 'round', roundNumber: 2 },
   { id: 'offer',        label: 'Offer Released',       color: '#16A34A', type: 'offer' },
@@ -151,7 +151,20 @@ const evalsKey     = () => `hs_evaluations`
 export function loadPipeline(jobId: string): PipelineState {
   try {
     const raw = localStorage.getItem(pipelineKey(jobId))
-    if (raw) return JSON.parse(raw)
+    if (raw) {
+      const state: PipelineState = JSON.parse(raw)
+      // Migrate: rename old "Shortlisted" label to "Interviewing"
+      let migrated = false
+      state.stages = state.stages.map(s => {
+        if (s.id === 'shortlisted' && s.label === 'Shortlisted') {
+          migrated = true
+          return { ...s, label: 'Interviewing' }
+        }
+        return s
+      })
+      if (migrated) localStorage.setItem(pipelineKey(jobId), JSON.stringify(state))
+      return state
+    }
   } catch {}
   return { stages: DEFAULT_STAGES, candidates: [], stageMap: {}, notes: {}, ratings: {}, hireDecisions: {} }
 }
@@ -425,4 +438,108 @@ export function loadSettings(): HsSettings {
 
 export function saveSettings(s: HsSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+}
+
+// ── Application Flow Events ───────────────────────────────────────────────────
+
+export type AppFlowEventType =
+  | 'APPLIED' | 'SHORTLISTED' | 'STATUS_CHANGE' | 'ROUND_ADDED'
+  | 'ROUND_COMPLETED' | 'NOTE_ADDED' | 'EVALUATION_ADDED' | 'REJECTED' | 'OFFER' | 'HIRED'
+
+export interface AppFlowEvent {
+  id: string
+  candidateId: string
+  jobId: string
+  type: AppFlowEventType
+  label: string
+  detail?: string
+  fromStage?: string
+  toStage?: string
+  by?: string
+  byRole?: string
+  timestamp: string
+}
+
+const APP_FLOW_KEY = 'hs_app_flow_events'
+
+export function loadAppFlowEvents(candidateId: string, jobId: string): AppFlowEvent[] {
+  try {
+    const all: AppFlowEvent[] = JSON.parse(localStorage.getItem(APP_FLOW_KEY) ?? '[]')
+    return all
+      .filter(e => e.candidateId === candidateId && e.jobId === jobId)
+      .sort((a, b) => +new Date(a.timestamp) - +new Date(b.timestamp))
+  } catch { return [] }
+}
+
+export function saveAppFlowEvent(event: AppFlowEvent): void {
+  try {
+    const all: AppFlowEvent[] = JSON.parse(localStorage.getItem(APP_FLOW_KEY) ?? '[]')
+    all.push(event)
+    localStorage.setItem(APP_FLOW_KEY, JSON.stringify(all))
+  } catch {}
+}
+
+// ── Job Board Integration Config ──────────────────────────────────────────────
+
+export interface JobBoardPlatformConfig {
+  enabled: boolean
+  apiKey: string
+  clientId: string
+  clientSecret: string
+  accessToken: string
+  siteId: string       // Monster-specific
+}
+
+export interface JobBoardConfig {
+  dice:     JobBoardPlatformConfig
+  monster:  JobBoardPlatformConfig
+  linkedin: JobBoardPlatformConfig
+}
+
+export interface JobPostingRecord {
+  id: string
+  jobId: string
+  jobTitle: string
+  platform: 'dice' | 'monster' | 'linkedin'
+  postedAt: string
+  status: 'SUCCESS' | 'FAILED' | 'PENDING'
+  externalId?: string
+  error?: string
+}
+
+const DEFAULT_PLATFORM: JobBoardPlatformConfig = {
+  enabled: false, apiKey: '', clientId: '', clientSecret: '', accessToken: '', siteId: '',
+}
+
+const JOB_BOARD_CONFIG_KEY   = 'hs_job_board_config'
+const JOB_POSTING_HISTORY_KEY = 'hs_job_posting_history'
+
+export function loadJobBoardConfig(): JobBoardConfig {
+  try {
+    const raw = localStorage.getItem(JOB_BOARD_CONFIG_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      return {
+        dice:     { ...DEFAULT_PLATFORM, ...parsed.dice },
+        monster:  { ...DEFAULT_PLATFORM, ...parsed.monster },
+        linkedin: { ...DEFAULT_PLATFORM, ...parsed.linkedin },
+      }
+    }
+  } catch {}
+  return { dice: { ...DEFAULT_PLATFORM }, monster: { ...DEFAULT_PLATFORM }, linkedin: { ...DEFAULT_PLATFORM } }
+}
+
+export function saveJobBoardConfig(cfg: JobBoardConfig): void {
+  localStorage.setItem(JOB_BOARD_CONFIG_KEY, JSON.stringify(cfg))
+}
+
+export function loadJobPostingHistory(): JobPostingRecord[] {
+  try { return JSON.parse(localStorage.getItem(JOB_POSTING_HISTORY_KEY) ?? '[]') } catch { return [] }
+}
+
+export function saveJobPostingRecord(r: JobPostingRecord): void {
+  const all = loadJobPostingHistory()
+  const idx = all.findIndex(x => x.id === r.id)
+  if (idx >= 0) all[idx] = r; else all.unshift(r)
+  localStorage.setItem(JOB_POSTING_HISTORY_KEY, JSON.stringify(all))
 }

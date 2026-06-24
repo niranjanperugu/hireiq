@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -39,6 +40,7 @@ public class PublicApplyController {
      * GET /api/v1/public/jobs/{jobId}
      */
     @GetMapping("/jobs/{jobId}")
+    @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getJobPublicInfo(@PathVariable String jobId) {
         try {
             Job job = jobRepository.findById(UUID.fromString(jobId))
@@ -77,6 +79,7 @@ public class PublicApplyController {
      * POST /api/v1/public/jobs/{jobId}/apply
      */
     @PostMapping(value = "/jobs/{jobId}/apply", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
     public ResponseEntity<Map<String, Object>> applyForJob(
             @PathVariable String jobId,
             @RequestParam String name,
@@ -110,6 +113,14 @@ public class PublicApplyController {
                     .filter(r -> "SKILL".equals(r.getRequirementType()))
                     .map(JobRequirement::getRequirementValue)
                     .collect(Collectors.toList());
+
+            // Duplicate check: same email already applied to this job
+            if (resumeAnalysisRepository.existsByOrganizationIdAndEmailIgnoreCaseAndJobId(orgId, email, jobId)) {
+                response.put("success",     false);
+                response.put("isDuplicate", true);
+                response.put("message",     "You have already applied for this position. Duplicate applications are not accepted.");
+                return ResponseEntity.badRequest().body(response);
+            }
 
             // Rename file to include candidate name so NLP picks it up
             MultipartFile namedFile = rename(resume, name);

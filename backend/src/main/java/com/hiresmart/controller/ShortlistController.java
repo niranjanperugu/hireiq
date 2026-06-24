@@ -4,17 +4,20 @@ import com.hiresmart.entity.ShortlistRecord;
 import com.hiresmart.repository.ShortlistRecordRepository;
 import com.hiresmart.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/shortlist")
 @RequiredArgsConstructor
+@Slf4j
 @PreAuthorize("hasRole('HR_ADMINISTRATOR') or hasRole('RECRUITER') or hasRole('HIRING_MANAGER')")
 public class ShortlistController {
 
@@ -29,6 +32,9 @@ public class ShortlistController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestBody Map<String, Object> body
     ) {
+        if (principal == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+        }
         try {
             String resumeAnalysisId = (String) body.get("resumeAnalysisId");
             String jobId            = (String) body.get("jobId");
@@ -70,19 +76,22 @@ public class ShortlistController {
             }
 
             ShortlistRecord saved = repository.save(record);
-            return ResponseEntity.ok(Map.of(
-                    "id",                saved.getId(),
-                    "resumeAnalysisId",  saved.getResumeAnalysisId(),
-                    "jobId",             saved.getJobId(),
-                    "shortlistedBy",     saved.getShortlistedBy(),
-                    "shortlistedByRole", saved.getShortlistedByRole(),
-                    "method",            saved.getMethod().name(),
-                    "atsScore",          saved.getAtsScore(),
-                    "notes",             saved.getNotes(),
-                    "shortlistedAt",     saved.getShortlistedAt().toString()
-            ));
+            Map<String, Object> result = new HashMap<>();
+            result.put("id",                saved.getId());
+            result.put("resumeAnalysisId",  saved.getResumeAnalysisId());
+            result.put("jobId",             saved.getJobId());
+            result.put("shortlistedBy",     saved.getShortlistedBy());
+            result.put("shortlistedByRole", saved.getShortlistedByRole() != null ? saved.getShortlistedByRole() : "");
+            result.put("method",            saved.getMethod().name());
+            result.put("atsScore",          saved.getAtsScore());
+            result.put("notes",             saved.getNotes() != null ? saved.getNotes() : "");
+            result.put("shortlistedAt",     saved.getShortlistedAt().toString());
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.error("Shortlist save failed", e);
+            Map<String, Object> err = new HashMap<>();
+            err.put("error", e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            return ResponseEntity.badRequest().body(err);
         }
     }
 

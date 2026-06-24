@@ -16,7 +16,7 @@ import { apiClient } from '@services/apiClient'
 import {
   PipelineState, PipelineStage, PipelineCandidate, InterviewSchedule,
   loadPipeline, savePipeline, loadSchedules, saveSchedule,
-  uid, DEFAULT_STAGES, loadSettings
+  uid, DEFAULT_STAGES, loadSettings, saveAppFlowEvent,
 } from '@utils/pipelineStorage'
 import { sendShortlistEmail, sendRejectionEmail, sendOfferEmail } from '@services/notificationApi'
 import CandidateDetailModal, { CandidateModalData } from '@components/CandidateDetailModal'
@@ -262,6 +262,23 @@ const JobPipelinePage: React.FC = () => {
   }, [organizationId])
 
   const handleMove = (candidateId: string, stageId: string) => {
+    const fromStageId = pipeline.stageMap[candidateId]
+    const fromStage   = pipeline.stages.find(s => s.id === fromStageId)
+    const toStage     = pipeline.stages.find(s => s.id === stageId)
+    const candidate   = pipeline.candidates.find(c => c.id === candidateId)
+    if (toStage && fromStage?.id !== toStage.id) {
+      saveAppFlowEvent({
+        id: uid(), candidateId, jobId: jobId!,
+        type: toStage.type === 'rejected' ? 'REJECTED'
+            : toStage.type === 'hired'    ? 'HIRED'
+            : toStage.type === 'offer'    ? 'OFFER'
+            : 'STATUS_CHANGE',
+        label: `${candidate?.name ?? 'Candidate'} moved to ${toStage.label}`,
+        fromStage: fromStage?.label,
+        toStage: toStage.label,
+        timestamp: new Date().toISOString(),
+      })
+    }
     const next = { ...pipeline, stageMap: { ...pipeline.stageMap, [candidateId]: stageId } }
     persist(next)
   }
@@ -291,12 +308,20 @@ const JobPipelinePage: React.FC = () => {
       addedAt: new Date().toISOString(),
       source: 'analysis'
     }
+    const firstStage = pipeline.stages[0] ?? DEFAULT_STAGES[0]
     const next = {
       ...pipeline,
       candidates: [...pipeline.candidates, c],
       stageMap: { ...pipeline.stageMap, [c.id]: 'shortlisted' }
     }
     persist(next)
+    saveAppFlowEvent({
+      id: uid(), candidateId: c.id, jobId: jobId!,
+      type: 'SHORTLISTED',
+      label: `${c.name} added to pipeline – ${firstStage.label}`,
+      toStage: firstStage.label,
+      timestamp: new Date().toISOString(),
+    })
   }
 
   const openSchedule = (c: PipelineCandidate, stageId: string) => {
@@ -374,6 +399,14 @@ const JobPipelinePage: React.FC = () => {
     localStorage.setItem('hs_evaluations', JSON.stringify(all))
     setEvaluations(all)
     setEvalOpen(false)
+    saveAppFlowEvent({
+      id: uid(), candidateId: activeCandidate.id, jobId: jobId!,
+      type: 'EVALUATION_ADDED',
+      label: `Evaluation by ${evalPanel} – ${evalRec === 'ADVANCE' ? 'Proceed' : evalRec === 'HIRE' ? 'Strong Hire' : evalRec === 'REJECT' ? 'Reject' : 'Hold'}`,
+      detail: `${stage?.label} · ${evalOverall}/5 stars${evalComments ? ' · ' + evalComments.slice(0,60) : ''}`,
+      by: evalPanel,
+      timestamp: new Date().toISOString(),
+    })
 
     // Fire email based on recommendation
     const settings = loadSettings()

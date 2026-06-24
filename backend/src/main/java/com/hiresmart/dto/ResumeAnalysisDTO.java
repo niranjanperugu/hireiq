@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Data
 @NoArgsConstructor
@@ -38,6 +39,31 @@ public class ResumeAnalysisDTO {
     private boolean isApplied;
     private String source;
 
+    /** Extracted projects: [{name, description, responsibilities[], technologies[], duration}] */
+    private List<Map<String, Object>> projects;
+
+    /** Per-component score breakdown: {skillMatch, experienceFit, jdRelevance, education, resumeQuality, total} */
+    private Map<String, Object> scoreBreakdown;
+
+    /** Top strengths for this specific role */
+    private List<String> keyStrengths;
+
+    /** Gaps / areas for improvement */
+    private List<String> areasForImprovement;
+
+    /** STRONG_FIT | GOOD_FIT | POTENTIAL_FIT | NOT_FIT */
+    private String hiringRecommendation;
+
+    /** True when the same email+jobId already exists; analysis was skipped */
+    @JsonProperty("isDuplicate")
+    private boolean isDuplicate;
+
+    /** Narrative explanation of JD alignment */
+    private String jdAlignment;
+
+    /** Complete structured ATS analysis from Claude (job_description_match, required_skills_match, etc.) */
+    private Map<String, Object> fullAnalysis;
+
     public static ResumeAnalysisDTO fromEntity(ResumeAnalysis entity, ObjectMapper mapper) {
         return ResumeAnalysisDTO.builder()
             .id(entity.getId())
@@ -46,8 +72,8 @@ public class ResumeAnalysisDTO {
             .email(entity.getEmail())
             .phone(entity.getPhone())
             .atsScore(entity.getAtsScore())
-            .matchedSkills(parseJson(entity.getMatchedSkillsJson(), mapper))
-            .missingSkills(parseJson(entity.getMissingSkillsJson(), mapper))
+            .matchedSkills(parseStringList(entity.getMatchedSkillsJson(), mapper))
+            .missingSkills(parseStringList(entity.getMissingSkillsJson(), mapper))
             .yearsOfExperience(entity.getYearsOfExperience())
             .education(entity.getEducation())
             .professionalSummary(entity.getProfessionalSummary())
@@ -59,15 +85,42 @@ public class ResumeAnalysisDTO {
             .jobTitle(entity.getJobTitle())
             .isApplied(entity.isApplied())
             .source(entity.getSource())
+            .projects(parseProjectList(entity.getProjectsJson(), mapper))
+            .scoreBreakdown(parseMap(entity.getScoreBreakdownJson(), mapper))
+            .keyStrengths(parseStringList(entity.getKeyStrengthsJson(), mapper))
+            .areasForImprovement(parseStringList(entity.getAreasForImprovementJson(), mapper))
+            .hiringRecommendation(entity.getHiringRecommendation())
+            .jdAlignment(entity.getJdAlignment())
+            .fullAnalysis(parseMap(entity.getFullAnalysisJson(), mapper))
             .build();
     }
 
-    private static List<String> parseJson(String json, ObjectMapper mapper) {
+    private static List<String> parseStringList(String json, ObjectMapper mapper) {
         if (json == null || json.isBlank()) return List.of();
         try {
             return mapper.readValue(json, new TypeReference<List<String>>() {});
         } catch (Exception e) {
             return List.of();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> parseProjectList(String json, ObjectMapper mapper) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return mapper.readValue(json, new TypeReference<List<Map<String, Object>>>() {});
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> parseMap(String json, ObjectMapper mapper) {
+        if (json == null || json.isBlank()) return Map.of();
+        try {
+            return mapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            return Map.of();
         }
     }
 }

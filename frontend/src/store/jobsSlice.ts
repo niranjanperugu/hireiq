@@ -93,6 +93,30 @@ export const updateJob = createAsyncThunk(
   }
 )
 
+export const publishJob = createAsyncThunk(
+  'jobs/publishJob',
+  async ({ organizationId, jobId }: any, { rejectWithValue }) => {
+    try {
+      const response = await apiClient.put(`/organizations/${organizationId}/jobs/${jobId}/publish`, {})
+      return response.data.data
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to publish job')
+    }
+  }
+)
+
+export const unpublishJob = createAsyncThunk(
+  'jobs/unpublishJob',
+  async ({ organizationId, jobId, currentData }: any, { rejectWithValue }) => {
+    try {
+      const response = await apiClient.put(`/organizations/${organizationId}/jobs/${jobId}`, { ...currentData, status: 'DRAFT' })
+      return response.data.data
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to unpublish job')
+    }
+  }
+)
+
 export const deleteJob = createAsyncThunk(
   'jobs/deleteJob',
   async ({ organizationId, jobId }: any, { rejectWithValue }) => {
@@ -136,6 +160,14 @@ const jobsSlice = createSlice({
       .addCase(deleteJob.fulfilled, (state, action) => {
         state.jobs = state.jobs.filter(j => j.id !== action.payload)
         state.pagination.totalElements = Math.max(0, (state.pagination.totalElements || 1) - 1)
+      })
+      .addCase(publishJob.fulfilled, (state, action) => {
+        const idx = state.jobs.findIndex(j => j.id === action.payload.id)
+        if (idx !== -1) state.jobs[idx] = action.payload
+      })
+      .addCase(unpublishJob.fulfilled, (state, action) => {
+        const idx = state.jobs.findIndex(j => j.id === action.payload.id)
+        if (idx !== -1) state.jobs[idx] = action.payload
       })
   }
 })

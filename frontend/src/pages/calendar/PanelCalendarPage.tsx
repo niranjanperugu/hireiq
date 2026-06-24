@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import {
   Box, Typography, Card, CardContent, Button, Chip, Avatar,
-  IconButton, Tooltip, Divider
+  IconButton, Tooltip, Divider,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, Select, MenuItem, FormControl, InputLabel,
 } from '@mui/material'
 import {
   ChevronLeft, ChevronRight, Today, VideoCall, Phone, Business,
-  AccessTime, People, Assessment, CheckCircle, EventNote
+  AccessTime, People, Assessment, CheckCircle, EventNote, Edit, Schedule,
 } from '@mui/icons-material'
-import { InterviewSchedule, loadSchedules } from '@utils/pipelineStorage'
-import { useNavigate } from 'react-router-dom'
+import { InterviewSchedule, loadSchedules, saveSchedule } from '@utils/pipelineStorage'
+import { useNavigate, useLocation } from 'react-router-dom'
 
 const NAVY    = '#F8FAFC'
 const NAVY_MID= '#FFFFFF'
@@ -35,14 +37,40 @@ function sameDay(a: Date, b: Date) {
 
 const PanelCalendarPage: React.FC = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const [schedules, setSchedules] = useState<InterviewSchedule[]>([])
   const [today]    = useState(new Date())
   const [current,  setCurrent]  = useState(new Date())
   const [selected, setSelected] = useState<Date>(new Date())
 
+  // Edit dialog state
+  const [editOpen,      setEditOpen]      = useState(false)
+  const [editSchedule,  setEditSchedule]  = useState<InterviewSchedule | null>(null)
+  const [editDateTime,  setEditDateTime]  = useState('')
+  const [editMode,      setEditMode]      = useState<'VIDEO'|'PHONE'|'IN_PERSON'>('VIDEO')
+  const [editLink,      setEditLink]      = useState('')
+
+  const reloadSchedules = () => setSchedules(loadSchedules())
+
+  // Reload every time the calendar route is visited
   useEffect(() => {
-    setSchedules(loadSchedules())
-  }, [])
+    reloadSchedules()
+  }, [location.pathname])
+
+  const openEdit = (s: InterviewSchedule) => {
+    setEditSchedule(s)
+    setEditDateTime(s.dateTime)
+    setEditMode(s.type)
+    setEditLink(s.meetingLink ?? '')
+    setEditOpen(true)
+  }
+
+  const saveEdit = () => {
+    if (!editSchedule || !editDateTime) return
+    saveSchedule({ ...editSchedule, dateTime: editDateTime, type: editMode, meetingLink: editLink })
+    reloadSchedules()
+    setEditOpen(false)
+  }
 
   // Build calendar grid
   const year  = current.getFullYear()
@@ -220,70 +248,113 @@ const PanelCalendarPage: React.FC = () => {
               .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime())
               .map(s => (
             <Card key={s.id} sx={{ mb: 1.5, bgcolor: NAVY_MID, border: `1px solid ${NAVY_LT}`,
-              borderLeft: `3px solid ${TYPE_COLOR[s.type] ?? ORANGE}`, borderRadius: 2 }}>
-              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+              borderLeft: `4px solid ${TYPE_COLOR[s.type] ?? ORANGE}`, borderRadius: 2 }}>
+              <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
+
+                {/* Header row */}
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1.5}>
                   <Box display="flex" gap={1.5} flex={1}>
-                    <Avatar sx={{ width: 36, height: 36, fontSize: '0.7rem', fontWeight: 700, bgcolor: NAVY_LT, flexShrink: 0 }}>
+                    <Avatar sx={{ width: 40, height: 40, fontSize: '0.75rem', fontWeight: 700,
+                      background: `linear-gradient(135deg, ${ORANGE}, #4338CA)`, flexShrink: 0 }}>
                       {s.candidateName.split(' ').map(w => w[0]).slice(0,2).join('')}
                     </Avatar>
                     <Box>
-                      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.875rem', color: '#E2E8F0' }}>
+                      <Typography variant="body1" sx={{ fontWeight: 700, fontSize: '0.95rem', color: '#E2E8F0', lineHeight: 1.2 }}>
                         {s.candidateName}
                       </Typography>
-                      <Typography variant="caption" sx={{ color: '#64748B', fontSize: '0.7rem' }}>
-                        {s.stageName} • {s.jobTitle}
+                      <Typography variant="caption" sx={{ color: '#64748B', fontSize: '0.72rem' }}>
+                        {s.stageName} · {s.jobTitle}
                       </Typography>
-                      <Box display="flex" gap={2} mt={0.75} flexWrap="wrap" alignItems="center">
-                        <Box display="flex" alignItems="center" gap={0.5}>
-                          <AccessTime sx={{ fontSize: '0.8rem', color: '#475569' }} />
-                          <Typography variant="caption" sx={{ color: '#94A3B8', fontSize: '0.72rem' }}>
-                            {new Date(s.dateTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                            {' '}({s.duration} min)
-                          </Typography>
-                        </Box>
-                        <Box display="flex" alignItems="center" gap={0.5} sx={{ color: TYPE_COLOR[s.type] }}>
-                          {TYPE_ICON[s.type]}
-                          <Typography variant="caption" sx={{ fontSize: '0.72rem' }}>
-                            {s.type.replace('_',' ')}
-                          </Typography>
-                        </Box>
-                        {s.panelMembers.length > 0 && (
-                          <Box display="flex" alignItems="center" gap={0.5}>
-                            <People sx={{ fontSize: '0.8rem', color: '#475569' }} />
-                            <Typography variant="caption" sx={{ color: '#94A3B8', fontSize: '0.72rem' }}>
-                              {s.panelMembers.join(', ')}
-                            </Typography>
-                          </Box>
-                        )}
-                      </Box>
                     </Box>
                   </Box>
-
-                  <Box display="flex" flexDirection="column" gap={0.75} alignItems="flex-end">
+                  <Box display="flex" gap={0.75} alignItems="center">
                     <Chip label={s.status} size="small" sx={{
-                      height: 18, fontSize: '0.6rem', fontWeight: 700,
+                      height: 20, fontSize: '0.62rem', fontWeight: 700,
                       bgcolor: s.status === 'SCHEDULED' ? 'rgba(56,189,248,0.15)'
                              : s.status === 'COMPLETED' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
                       color: s.status === 'SCHEDULED' ? '#38BDF8'
                            : s.status === 'COMPLETED' ? '#22C55E' : '#EF4444'
                     }} />
-                    {s.meetingLink && (
-                      <Button size="small" href={s.meetingLink} target="_blank" variant="outlined"
-                        sx={{ fontSize: '0.65rem', py: 0.25, px: 0.75, borderColor: '#38BDF855', color: '#38BDF8',
-                          '&:hover': { bgcolor: 'rgba(56,189,248,0.1)' } }}>
-                        Join
-                      </Button>
-                    )}
-                    <Button size="small" variant="outlined"
-                      startIcon={<Assessment sx={{ fontSize: '0.75rem !important' }} />}
-                      onClick={() => navigate('/evaluations')}
-                      sx={{ fontSize: '0.65rem', py: 0.25, px: 0.75, borderColor: '#A78BFA55', color: '#A78BFA',
-                        '&:hover': { bgcolor: 'rgba(167,139,250,0.1)' } }}>
-                      Evaluate
-                    </Button>
+                    <Chip label={s.type.replace('_',' ')} size="small"
+                      icon={<Box sx={{ ml: '6px !important' }}>{TYPE_ICON[s.type]}</Box>}
+                      sx={{ height: 20, fontSize: '0.62rem', fontWeight: 600,
+                        bgcolor: `${TYPE_COLOR[s.type]}20`, color: TYPE_COLOR[s.type] }} />
                   </Box>
                 </Box>
+
+                {/* Detail grid */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mb: 1.5,
+                  p: 1.5, borderRadius: 1.5, bgcolor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <Box display="flex" alignItems="center" gap={0.75}>
+                    <AccessTime sx={{ fontSize: '0.85rem', color: '#475569', flexShrink: 0 }} />
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#475569', fontSize: '0.6rem', display: 'block', lineHeight: 1 }}>TIME</Typography>
+                      <Typography variant="caption" sx={{ color: '#E2E8F0', fontSize: '0.75rem', fontWeight: 600 }}>
+                        {new Date(s.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                        <Box component="span" sx={{ color: '#64748B', fontWeight: 400 }}> · {s.duration} min</Box>
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Box display="flex" alignItems="center" gap={0.75}>
+                    <Schedule sx={{ fontSize: '0.85rem', color: '#475569', flexShrink: 0 }} />
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#475569', fontSize: '0.6rem', display: 'block', lineHeight: 1 }}>DATE</Typography>
+                      <Typography variant="caption" sx={{ color: '#E2E8F0', fontSize: '0.75rem', fontWeight: 600 }}>
+                        {new Date(s.dateTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  {s.panelMembers.length > 0 && (
+                    <Box display="flex" alignItems="flex-start" gap={0.75} sx={{ gridColumn: '1 / -1' }}>
+                      <People sx={{ fontSize: '0.85rem', color: '#475569', flexShrink: 0, mt: '2px' }} />
+                      <Box>
+                        <Typography variant="caption" sx={{ color: '#475569', fontSize: '0.6rem', display: 'block', lineHeight: 1 }}>PANEL</Typography>
+                        <Typography variant="caption" sx={{ color: '#94A3B8', fontSize: '0.75rem' }}>
+                          {s.panelMembers.join(' · ')}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                  {s.meetingLink && (
+                    <Box display="flex" alignItems="center" gap={0.75} sx={{ gridColumn: '1 / -1' }}>
+                      <VideoCall sx={{ fontSize: '0.85rem', color: '#38BDF8', flexShrink: 0 }} />
+                      <Box>
+                        <Typography variant="caption" sx={{ color: '#475569', fontSize: '0.6rem', display: 'block', lineHeight: 1 }}>MEETING LINK</Typography>
+                        <Typography variant="caption" component="a" href={s.meetingLink} target="_blank"
+                          sx={{ color: '#38BDF8', fontSize: '0.72rem', wordBreak: 'break-all',
+                            textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>
+                          {s.meetingLink.length > 60 ? s.meetingLink.slice(0, 60) + '…' : s.meetingLink}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Action buttons */}
+                <Box display="flex" gap={1} justifyContent="flex-end">
+                  {s.meetingLink && (
+                    <Button size="small" href={s.meetingLink} target="_blank" variant="outlined"
+                      sx={{ fontSize: '0.65rem', py: 0.4, px: 1, borderColor: '#38BDF855', color: '#38BDF8',
+                        '&:hover': { bgcolor: 'rgba(56,189,248,0.1)' } }}>
+                      Join Meeting
+                    </Button>
+                  )}
+                  <Button size="small" variant="outlined"
+                    startIcon={<Edit sx={{ fontSize: '0.75rem !important' }} />}
+                    onClick={() => openEdit(s)}
+                    sx={{ fontSize: '0.65rem', py: 0.4, px: 1, borderColor: `${ORANGE}55`, color: ORANGE,
+                      '&:hover': { bgcolor: `${ORANGE}10` } }}>
+                    Edit
+                  </Button>
+                  <Button size="small" variant="outlined"
+                    startIcon={<Assessment sx={{ fontSize: '0.75rem !important' }} />}
+                    onClick={() => navigate('/evaluations')}
+                    sx={{ fontSize: '0.65rem', py: 0.4, px: 1, borderColor: '#A78BFA55', color: '#A78BFA',
+                      '&:hover': { bgcolor: 'rgba(167,139,250,0.1)' } }}>
+                    Evaluate
+                  </Button>
+                </Box>
+
               </CardContent>
             </Card>
           ))}
@@ -326,6 +397,55 @@ const PanelCalendarPage: React.FC = () => {
           )}
         </Box>
       </Box>
+
+      {/* ── Edit Schedule Dialog ── */}
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { borderRadius: 2.5 } }}>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1,
+          borderBottom: '1px solid #E2E8F0' }}>
+          <Schedule sx={{ color: ORANGE, fontSize: 22 }} />
+          <Box>
+            <Typography sx={{ fontSize: 15, fontWeight: 700, color: '#1E293B', lineHeight: 1.2 }}>
+              Edit Schedule — {editSchedule?.stageName}
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: '#64748B', fontWeight: 400 }}>
+              {editSchedule?.candidateName} · {editSchedule?.jobTitle}
+            </Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2.5, pb: 1 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
+            <TextField size="small" label="Date & Time" type="datetime-local"
+              value={editDateTime} onChange={e => setEditDateTime(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ '& .MuiOutlinedInput-root': { fontSize: 13 } }} />
+            <FormControl size="small">
+              <InputLabel sx={{ fontSize: 13 }}>Meeting Format</InputLabel>
+              <Select value={editMode} label="Meeting Format"
+                onChange={e => setEditMode(e.target.value as any)} sx={{ fontSize: 13 }}>
+                <MenuItem value="VIDEO">Video Call</MenuItem>
+                <MenuItem value="PHONE">Phone Call</MenuItem>
+                <MenuItem value="IN_PERSON">In-Person</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+          <TextField size="small" fullWidth label="Meeting Link"
+            placeholder="https://teams.microsoft.com/..."
+            value={editLink} onChange={e => setEditLink(e.target.value)}
+            sx={{ '& .MuiOutlinedInput-root': { fontSize: 13 } }} />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid #E2E8F0', gap: 1 }}>
+          <Button onClick={() => setEditOpen(false)}
+            sx={{ textTransform: 'none', fontSize: 13, color: '#64748B' }}>
+            Cancel
+          </Button>
+          <Button variant="contained" disabled={!editDateTime} onClick={saveEdit}
+            sx={{ textTransform: 'none', fontSize: 13, fontWeight: 700,
+              background: `linear-gradient(135deg, ${ORANGE}, #4338CA)`, minWidth: 120 }}>
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

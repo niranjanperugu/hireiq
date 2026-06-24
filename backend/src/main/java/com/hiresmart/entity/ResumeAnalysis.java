@@ -81,6 +81,34 @@ public class ResumeAnalysis {
     @Column(name = "job_title")
     private String jobTitle;
 
+    /** Complete structured ATS analysis JSON from Claude */
+    @Column(name = "full_analysis_json", columnDefinition = "TEXT")
+    private String fullAnalysisJson;
+
+    /** JSON array of project objects: [{name, description, responsibilities[], technologies[], duration}] */
+    @Column(name = "projects_json", columnDefinition = "TEXT")
+    private String projectsJson;
+
+    /** JSON object: {skillMatch, experienceFit, jdRelevance, education, resumeQuality, total} */
+    @Column(name = "score_breakdown_json", columnDefinition = "TEXT")
+    private String scoreBreakdownJson;
+
+    /** JSON array of top strength strings for this role */
+    @Column(name = "key_strengths_json", columnDefinition = "TEXT")
+    private String keyStrengthsJson;
+
+    /** JSON array of improvement area strings */
+    @Column(name = "areas_for_improvement_json", columnDefinition = "TEXT")
+    private String areasForImprovementJson;
+
+    /** STRONG_FIT | GOOD_FIT | POTENTIAL_FIT | NOT_FIT */
+    @Column(name = "hiring_recommendation", length = 20)
+    private String hiringRecommendation;
+
+    /** 2-3 sentence JD alignment narrative */
+    @Column(name = "jd_alignment", columnDefinition = "TEXT")
+    private String jdAlignment;
+
     @PrePersist
     protected void onCreate() {
         analyzedAt = LocalDateTime.now();

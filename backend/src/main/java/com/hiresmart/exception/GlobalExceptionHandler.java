@@ -81,30 +81,32 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handle generic Exception
-     */
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Object>> handleGlobalException(
-            Exception ex, WebRequest request) {
-
-        log.error("Unexpected error occurred", ex);
-
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.internalError("An unexpected error occurred: " + ex.getMessage()));
-    }
-
-    /**
-     * Handle RuntimeException
+     * Handle RuntimeException (more specific — matched before generic Exception)
      */
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ApiResponse<Object>> handleRuntimeException(
             RuntimeException ex, WebRequest request) {
 
-        log.error("Runtime exception: {}", ex.getMessage());
+        log.error("Runtime exception on {}", request.getDescription(false), ex);
 
+        String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.internalError(ex.getMessage()));
+                .body(ApiResponse.internalError(msg));
+    }
+
+    /**
+     * Handle generic Exception (catch-all)
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiResponse<Object>> handleGlobalException(
+            Exception ex, WebRequest request) {
+
+        log.error("Unexpected error on {}", request.getDescription(false), ex);
+
+        String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponse.internalError("An unexpected error occurred: " + msg));
     }
 }
