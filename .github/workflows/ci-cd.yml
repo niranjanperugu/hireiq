@@ -1,30 +1,36 @@
-name: CI/CD Pipeline
+name: CI/CD — ECS Deployment
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
 
 env:
-  REGISTRY: ghcr.io
-  BACKEND_IMAGE: ${{ github.repository }}/hiresmart-backend
-  FRONTEND_IMAGE: ${{ github.repository }}/hiresmart-frontend
+  AWS_REGION:        ap-south-1
+  ECR_BACKEND_REPO:  hiresmart/backend
+  ECR_FRONTEND_REPO: hiresmart/frontend
 
 jobs:
-  # Backend Tests
+  # ── Backend Tests (runs on EC2 self-hosted runner) ───────────────────────────
   backend-test:
-    runs-on: ubuntu-latest
-    name: Backend - Test & Build
+    name: Backend — Test & Build
+    runs-on: [self-hosted, linux, build-server]
 
     services:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: test_user
+          POSTGRES_USER:     test_user
           POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: hiresmart_test
+          POSTGRES_DB:       hiresmart_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -34,16 +40,16 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: '21'
-          distribution: 'temurin'
+          distribution: temurin
           cache: maven
 
-      - name: Run backend tests
+      - name: Run unit tests
         working-directory: ./backend
         run: mvn clean test
 
@@ -51,295 +57,321 @@ jobs:
         working-directory: ./backend
         run: mvn verify
         env:
-          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/hiresmart_test
+          SPRING_DATASOURCE_URL:      jdbc:postgresql://localhost:5432/hiresmart_test
           SPRING_DATASOURCE_USERNAME: test_user
           SPRING_DATASOURCE_PASSWORD: test_password
 
-      - name: Check code coverage
+      - name: JaCoCo coverage report
         working-directory: ./backend
         run: mvn jacoco:report
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
         with:
           files: ./backend/target/site/jacoco/jacoco.xml
           flags: backend
-          name: backend-coverage
 
-      - name: Build Docker image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          docker build -t ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }} ./backend
-          docker tag ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
-
-  # Frontend Tests
+  # ── Frontend Tests (runs on EC2 self-hosted runner) ──────────────────────────
   frontend-test:
-    runs-on: ubuntu-latest
-    name: Frontend - Test & Build
+    name: Frontend — Lint, Test & Build
+    runs-on: [self-hosted, linux, build-server]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         working-directory: ./frontend
         run: npm ci
 
-      - name: Run linter
+      - name: Lint
         working-directory: ./frontend
         run: npm run lint || true
 
-      - name: Run unit tests
+      - name: Unit tests
         working-directory: ./frontend
-        run: npm run test
+        run: npm test -- --run
 
-      - name: Generate coverage report
-        working-directory: ./frontend
-        run: npm run test:coverage || npm run test
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./frontend/coverage/coverage-final.json
-          flags: frontend
-          name: frontend-coverage
-
-      - name: Build frontend
+      - name: Build (verify no TS errors)
         working-directory: ./frontend
         run: npm run build
         env:
-          VITE_API_URL: https://api.example.com/api/v1
+          VITE_API_URL: https://staging.hireiq.ai/api/v1
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
         with:
-          name: frontend-build
-          path: frontend/dist
+          files: ./frontend/coverage/coverage-final.json
+          flags: frontend
 
-      - name: Build Docker image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          docker build -t ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }} ./frontend
-          docker tag ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
-
-  # Security Scan
+  # ── Security Scan (GitHub-hosted) ────────────────────────────────────────────
   security-scan:
+    name: Security Scanning (Trivy)
     runs-on: ubuntu-latest
-    name: Security Scanning
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Run Trivy vulnerability scanner
+      - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
 
-      - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: trivy-results.sarif
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-
-      - name: Run npm audit
+      - name: npm audit
         working-directory: ./frontend
         continue-on-error: true
         run: npm audit --audit-level=moderate
 
-      - name: Run Maven dependency check
-        working-directory: ./backend
-        continue-on-error: true
-        run: |
-          mvn org.owasp:dependency-check-maven:check || true
-
-  # Push Images
-  push-images:
+  # ── Build & Push Docker Images to ECR (EC2 runner) ───────────────────────────
+  build-and-push:
+    name: Build & Push to ECR
     needs: [backend-test, frontend-test, security-scan]
-    runs-on: ubuntu-latest
-    name: Push Docker Images
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, build-server]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
 
-    permissions:
-      contents: read
-      packages: write
+    outputs:
+      image_tag:          ${{ steps.tag.outputs.tag }}
+      backend_image_uri:  ${{ steps.tag.outputs.backend_uri }}
+      frontend_image_uri: ${{ steps.tag.outputs.frontend_uri }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Derive image tag
+        id: tag
+        run: |
+          TAG="sha-${{ github.sha }}"
+          REGISTRY="${{ steps.ecr-login.outputs.registry }}"
+          echo "tag=${TAG}"                                                                    >> $GITHUB_OUTPUT
+          echo "backend_uri=${REGISTRY}/${{ env.ECR_BACKEND_REPO }}:${TAG}"   >> $GITHUB_OUTPUT
+          echo "frontend_uri=${REGISTRY}/${{ env.ECR_FRONTEND_REPO }}:${TAG}" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
-        uses: docker/login-action@v2
+      - name: Build & push backend image
+        uses: docker/build-push-action@v5
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract version
-        id: meta
-        run: |
-          VERSION=$(git describe --tags --always)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v4
-        with:
-          context: ./backend
-          push: true
+          context:   ./backend
+          push:      true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:buildcache,mode=max
+            ${{ steps.tag.outputs.backend_uri }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPO }}:latest
+          cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPO }}:buildcache
+          cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPO }}:buildcache,mode=max
 
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v4
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v5
         with:
-          context: ./frontend
-          push: true
+          context:   ./frontend
+          push:      true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ steps.meta.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:buildcache,mode=max
+            ${{ steps.tag.outputs.frontend_uri }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND_REPO }}:latest
+          build-args: |
+            VITE_API_URL=https://staging.hireiq.ai/api/v1
+          cache-from: type=registry,ref=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND_REPO }}:buildcache
+          cache-to:   type=registry,ref=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND_REPO }}:buildcache,mode=max
 
-  # Deploy to Staging
+      - name: Trivy ECR image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.tag.outputs.backend_uri }}
+          format:    table
+          exit-code: 0
+          severity:  CRITICAL,HIGH
+
+  # ── Deploy to Staging ─────────────────────────────────────────────────────────
   deploy-staging:
-    needs: push-images
+    name: Deploy to Staging (ECS)
+    needs: build-and-push
     runs-on: ubuntu-latest
-    name: Deploy to Staging
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: staging
+
+    env:
+      ECS_CLUSTER:  hiresmart-staging-cluster
+      BACKEND_SVC:  hiresmart-staging-backend
+      FRONTEND_SVC: hiresmart-staging-frontend
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Extract version
-        id: meta
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Download backend task definition
         run: |
-          VERSION=$(git describe --tags --always)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          aws ecs describe-task-definition \
+            --task-definition hiresmart-staging-backend \
+            --query taskDefinition > backend-task-def.json
 
-      - name: Deploy to staging
-        env:
-          DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
-          DEPLOY_HOST: ${{ secrets.STAGING_HOST }}
-          DEPLOY_USER: ${{ secrets.STAGING_USER }}
-          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
+      - name: Render backend task definition
+        id: backend-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: backend-task-def.json
+          container-name:  backend
+          image:           ${{ needs.build-and-push.outputs.backend_image_uri }}
+
+      - name: Deploy backend → staging ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:            ${{ steps.backend-task-def.outputs.task-definition }}
+          service:                    ${{ env.BACKEND_SVC }}
+          cluster:                    ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Download frontend task definition
         run: |
-          mkdir -p ~/.ssh
-          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts 2>/dev/null
+          aws ecs describe-task-definition \
+            --task-definition hiresmart-staging-frontend \
+            --query taskDefinition > frontend-task-def.json
 
-          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST << 'EOF'
-            cd hiresmart
-            docker-compose pull
-            docker-compose up -d
-            docker-compose ps
-          EOF
+      - name: Render frontend task definition
+        id: frontend-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: frontend-task-def.json
+          container-name:  frontend
+          image:           ${{ needs.build-and-push.outputs.frontend_image_uri }}
 
-      - name: Run smoke tests
-        env:
-          STAGING_URL: ${{ secrets.STAGING_URL }}
+      - name: Deploy frontend → staging ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:            ${{ steps.frontend-task-def.outputs.task-definition }}
+          service:                    ${{ env.FRONTEND_SVC }}
+          cluster:                    ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Smoke test staging
         run: |
           sleep 10
-          curl -f $STAGING_URL/api/v1/health/status || exit 1
-          echo "Staging deployment successful"
+          curl -f "${{ secrets.STAGING_URL }}/api/v1/health/status" || exit 1
+          echo "Staging smoke test passed"
 
       - name: Notify Slack
         if: always()
-        uses: slackapi/slack-github-action@v1
+        uses: slackapi/slack-github-action@v2
         with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          webhook:      ${{ secrets.SLACK_WEBHOOK }}
+          webhook-type: incoming-webhook
           payload: |
-            {
-              "text": "Staging deployment ${{ job.status }}",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Staging Deployment* - ${{ job.status }}\nVersion: ${{ steps.meta.outputs.version }}"
-                  }
-                }
-              ]
-            }
+            {"text": "Staging deploy ${{ job.status }} — v${{ needs.build-and-push.outputs.image_tag }}"}
 
-  # Deploy to Production (Requires Manual Approval)
+  # ── Deploy to Production (manual approval gate) ───────────────────────────────
   deploy-production:
-    needs: deploy-staging
+    name: Deploy to Production (ECS)
+    needs: [build-and-push, deploy-staging]
     runs-on: ubuntu-latest
-    name: Deploy to Production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: production
 
+    env:
+      ECS_CLUSTER:  hiresmart-production-cluster
+      BACKEND_SVC:  hiresmart-production-backend
+      FRONTEND_SVC: hiresmart-production-frontend
+
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Extract version
-        id: meta
+      - name: Configure AWS credentials (production account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.PROD_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.PROD_AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Download backend task definition
         run: |
-          VERSION=$(git describe --tags --always)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          aws ecs describe-task-definition \
+            --task-definition hiresmart-production-backend \
+            --query taskDefinition > backend-task-def.json
 
-      - name: Deploy to production
-        env:
-          DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
-          DEPLOY_HOST: ${{ secrets.PROD_HOST }}
-          DEPLOY_USER: ${{ secrets.PROD_USER }}
-          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
+      - name: Render backend task definition
+        id: backend-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: backend-task-def.json
+          container-name:  backend
+          image:           ${{ needs.build-and-push.outputs.backend_image_uri }}
+
+      - name: Deploy backend → production ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:            ${{ steps.backend-task-def.outputs.task-definition }}
+          service:                    ${{ env.BACKEND_SVC }}
+          cluster:                    ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Download frontend task definition
         run: |
-          mkdir -p ~/.ssh
-          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts 2>/dev/null
+          aws ecs describe-task-definition \
+            --task-definition hiresmart-production-frontend \
+            --query taskDefinition > frontend-task-def.json
 
-          ssh -i ~/.ssh/deploy_key $DEPLOY_USER@$DEPLOY_HOST << 'EOF'
-            cd hiresmart
-            git pull origin main
-            docker-compose pull
-            docker-compose down
-            docker-compose up -d
-            docker-compose ps
-          EOF
+      - name: Render frontend task definition
+        id: frontend-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: frontend-task-def.json
+          container-name:  frontend
+          image:           ${{ needs.build-and-push.outputs.frontend_image_uri }}
 
-      - name: Verify production deployment
-        env:
-          PROD_URL: ${{ secrets.PROD_URL }}
+      - name: Deploy frontend → production ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:            ${{ steps.frontend-task-def.outputs.task-definition }}
+          service:                    ${{ env.FRONTEND_SVC }}
+          cluster:                    ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Production smoke test
         run: |
           sleep 15
-          curl -f $PROD_URL/api/v1/health/status || exit 1
-          echo "Production deployment successful"
+          curl -f "${{ secrets.PROD_URL }}/api/v1/health/status" || exit 1
+          echo "Production smoke test passed"
 
       - name: Notify team
         if: always()
-        uses: slackapi/slack-github-action@v1
+        uses: slackapi/slack-github-action@v2
         with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          webhook:      ${{ secrets.SLACK_WEBHOOK }}
+          webhook-type: incoming-webhook
           payload: |
-            {
-              "text": "Production deployment ${{ job.status }}",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Production Deployment* - ${{ job.status }}\nVersion: ${{ steps.meta.outputs.version }}\nCommit: <https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
-                  }
-                }
-              ]
-            }
+            {"text": "*Production deploy ${{ job.status }}* — <https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}> — v${{ needs.build-and-push.outputs.image_tag }}"}

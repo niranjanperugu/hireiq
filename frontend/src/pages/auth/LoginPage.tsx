@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '@hooks/redux'
-import { login } from '@store/authSlice'
+import { login, loginAsPanelMember } from '@store/authSlice'
+import { findPanelAccount } from '@utils/pipelineStorage'
 import {
   TextField, Button, Box, Typography, Alert,
   CircularProgress, FormControlLabel, Checkbox,
@@ -50,6 +51,15 @@ const LoginPage: React.FC = () => {
   const handleSubmit = async (ev: React.FormEvent) => {
     ev.preventDefault()
     if (!validate()) return
+
+    // Check panel member accounts first (local auth, no backend call)
+    const panelAccount = findPanelAccount(formData.email, formData.password)
+    if (panelAccount) {
+      await dispatch(loginAsPanelMember(panelAccount)).unwrap()
+      navigate('/panel')
+      return
+    }
+
     try {
       const result = await dispatch(login({ email: formData.email, password: formData.password })).unwrap()
       if (result) navigate('/')
@@ -267,12 +277,24 @@ const LoginPage: React.FC = () => {
 
           {/* Demo credentials hint */}
           <Box sx={{ mt: 4, p: 2, bgcolor: '#F8FAFC', borderRadius: 1.5, border: '1px solid #E2E8F0' }}>
-            <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em', mb: 0.75 }}>
+            <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.06em', mb: 1 }}>
               Demo credentials
             </Typography>
-            <Typography sx={{ fontSize: '0.8rem', color: '#475569', fontFamily: 'monospace' }}>
-              admin@hireiq.ai / Admin123!
-            </Typography>
+            <Box sx={{ mb: 0.5 }}>
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748B', mb: 0.25 }}>HR / Admin</Typography>
+              <Typography sx={{ fontSize: '0.8rem', color: '#475569', fontFamily: 'monospace' }}>
+                admin@hireiq.ai / Admin123!
+              </Typography>
+            </Box>
+            <Box sx={{ borderTop: '1px solid #E2E8F0', pt: 0.75, mt: 0.75 }}>
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#6366F1', mb: 0.25 }}>Panel Member (example)</Typography>
+              <Typography sx={{ fontSize: '0.8rem', color: '#475569', fontFamily: 'monospace' }}>
+                sarah.chen@hiresmart.com / Panel@123
+              </Typography>
+              <Typography sx={{ fontSize: '0.68rem', color: '#94A3B8', mt: 0.5 }}>
+                All 20 panel members use password: Panel@123
+              </Typography>
+            </Box>
           </Box>
 
           <Typography sx={{ textAlign: 'center', mt: 4, fontSize: '0.72rem', color: '#CBD5E1' }}>

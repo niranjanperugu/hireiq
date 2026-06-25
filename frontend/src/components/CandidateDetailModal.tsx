@@ -18,6 +18,22 @@ import {
   DEFAULT_STAGES, PipelineCandidate, loadSettings,
   saveAppFlowEvent, uid,
 } from '@utils/pipelineStorage'
+
+// Raw fetch that never triggers the apiClient 401-redirect interceptor.
+// Returns parsed JSON on success, null on any error (including 401/403/404).
+const _API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8080/api/v1'
+async function safeFetch(path: string): Promise<any | null> {
+  try {
+    const token = localStorage.getItem('token')
+    const resp  = await fetch(`${_API_BASE}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!resp.ok) return null
+    return await resp.json()
+  } catch {
+    return null
+  }
+}
 import { useAppSelector } from '@hooks/redux'
 import { sendShortlistEmail, sendRejectionEmail, sendOfferEmail } from '@services/notificationApi'
 import InterviewRoundsTab from '@components/InterviewRoundsTab'
@@ -354,7 +370,7 @@ export default function CandidateDetailModal({ open, data, onClose, onSchedule, 
     setActiveJobId(initialJobId)
     setActivePKey(initialCandidId)
 
-    // Pipeline-candidate path — no API call needed
+    // Pipeline-candidate path — show basic info instantly, silently enrich if token is real
     if (data.pipelineCandidate && !data.analysisId) {
       const c  = data.pipelineCandidate
       const jt = data.jobTitle || jobs.find(j => String(j.id) === initialJobId)?.title || ''
@@ -366,8 +382,40 @@ export default function CandidateDetailModal({ open, data, onClose, onSchedule, 
         rating: c.atsScore >= 80 ? 'EXCELLENT' : c.atsScore >= 60 ? 'GOOD' : 'FAIR',
         jobId: initialJobId, jobTitle: jt,
       })
-      setLoading(false)
+      setLoading(false)        // modal shows immediately — no spinner
       loadLocal(initialJobId, initialCandidId)
+
+      // Silently enrich with full AI analysis via safe (non-redirecting) fetch.
+      // safeFetch returns null on 401/403 instead of navigating to /login,
+      // so the modal stays open regardless of token type (real JWT or synthetic).
+      ;(async () => {
+        // Tier 1: direct lookup by analysis ID
+        if (c.source === 'analysis') {
+          const d1 = await safeFetch(`/resume-analysis/${c.id}`)
+          if (d1?.id) { setAnalysis(d1); return }
+        }
+        // Tier 2: job's applied list matched by email or ID
+        const d2 = await safeFetch(`/resume-analysis/job/${initialJobId}/applied`)
+        if (d2) {
+          const items: ResumeAnalysis[] = d2?.content ?? d2 ?? []
+          const found = items.find((a: ResumeAnalysis) =>
+            (c.email && a.email?.toLowerCase() === c.email?.toLowerCase()) || a.id === c.id
+          )
+          if (found) { setAnalysis(found); return }
+        }
+        // Tier 3: org-wide search matched by email + jobId
+        if (auth.organizationId && auth.organizationId !== 'local') {
+          const d3 = await safeFetch(`/resume-analysis/org/${auth.organizationId}/applied`)
+          if (d3) {
+            const all: ResumeAnalysis[] = d3?.data ?? d3 ?? []
+            const hit = c.email
+              ? all.find((a: ResumeAnalysis) =>
+                  a.email?.toLowerCase() === c.email?.toLowerCase() && a.jobId === initialJobId)
+              : undefined
+            if (hit) setAnalysis(hit)
+          }
+        }
+      })()
       return
     }
 

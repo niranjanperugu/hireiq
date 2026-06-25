@@ -543,3 +543,67 @@ export function saveJobPostingRecord(r: JobPostingRecord): void {
   if (idx >= 0) all[idx] = r; else all.unshift(r)
   localStorage.setItem(JOB_POSTING_HISTORY_KEY, JSON.stringify(all))
 }
+
+// ── Panel Member Login Accounts ────────────────────────────────────────────────
+// Separate from PanelMember (profiles) — these are actual login credentials
+
+export interface PanelMemberAccount {
+  id: string
+  panelMemberId: string   // links to PanelMember.id
+  name: string
+  email: string
+  password: string        // plain-text for demo; hash in production
+  role: 'PANEL_MEMBER'
+  department?: string
+  position?: string
+  avatarColor?: string
+}
+
+const PANEL_ACCOUNTS_KEY = 'hs_panel_accounts'
+
+function seedPanelAccounts(): PanelMemberAccount[] {
+  return SEEDED_PANEL_MEMBERS.map(pm => ({
+    id:            `acc_${pm.id}`,
+    panelMemberId: pm.id,
+    name:          pm.name,
+    email:         pm.email,
+    password:      'Panel@123',
+    role:          'PANEL_MEMBER' as const,
+    department:    pm.department,
+    position:      pm.position,
+    avatarColor:   pm.avatarColor,
+  }))
+}
+
+export function loadPanelAccounts(): PanelMemberAccount[] {
+  try {
+    const raw = localStorage.getItem(PANEL_ACCOUNTS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+    }
+  } catch {}
+  const accounts = seedPanelAccounts()
+  localStorage.setItem(PANEL_ACCOUNTS_KEY, JSON.stringify(accounts))
+  return accounts
+}
+
+export function findPanelAccount(email: string, password: string): PanelMemberAccount | null {
+  return loadPanelAccounts().find(
+    a => a.email.toLowerCase() === email.toLowerCase() && a.password === password
+  ) ?? null
+}
+
+export function savePanelAccount(a: PanelMemberAccount): void {
+  const all = loadPanelAccounts()
+  const idx = all.findIndex(x => x.id === a.id)
+  if (idx >= 0) all[idx] = a; else all.push(a)
+  localStorage.setItem(PANEL_ACCOUNTS_KEY, JSON.stringify(all))
+}
+
+export function deletePanelAccount(id: string): void {
+  localStorage.setItem(
+    PANEL_ACCOUNTS_KEY,
+    JSON.stringify(loadPanelAccounts().filter(a => a.id !== id))
+  )
+}

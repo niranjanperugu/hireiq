@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import { apiClient } from '@services/apiClient'
+import { PanelMemberAccount } from '@utils/pipelineStorage'
 
 export interface AuthState {
   isAuthenticated: boolean
@@ -52,6 +53,36 @@ export const register = createAsyncThunk(
   }
 )
 
+export const loginAsPanelMember = createAsyncThunk(
+  'auth/loginAsPanelMember',
+  async (account: PanelMemberAccount) => {
+    // Reuse the real admin token + orgId already in localStorage so that
+    // backend API calls (fetchJobs, etc.) continue to work for panel members.
+    const existingToken = localStorage.getItem('token')
+    const existingOrgId = localStorage.getItem('organizationId')
+    const token          = (existingToken && !existingToken.startsWith('panel_')) ? existingToken : `panel_${account.id}_${Date.now()}`
+    const organizationId = (existingOrgId && existingOrgId !== 'local') ? existingOrgId : 'local'
+
+    const [firstName, ...rest] = account.name.split(' ')
+    const user = {
+      id:            account.id,
+      panelMemberId: account.panelMemberId,
+      firstName,
+      lastName:      rest.join(' '),
+      email:         account.email,
+      role:          'PANEL_MEMBER',
+      department:    account.department ?? '',
+      position:      account.position ?? '',
+      avatarColor:   account.avatarColor ?? '#6366F1',
+    }
+    localStorage.setItem('token', token)
+    localStorage.setItem('refreshToken', token)
+    localStorage.setItem('user', JSON.stringify(user))
+    localStorage.setItem('organizationId', organizationId)
+    return { token, refreshToken: token, user, organizationId }
+  }
+)
+
 export const logout = createAsyncThunk('auth/logout', async (_, { rejectWithValue }) => {
   try {
     localStorage.removeItem('token')
@@ -90,6 +121,19 @@ const authSlice = createSlice({
         state.organizationId = action.payload.organizationId
       })
       .addCase(login.rejected, (state, action) => {
+        state.loading = false
+        state.error = action.payload as string
+      })
+      .addCase(loginAsPanelMember.pending, (state) => { state.loading = true; state.error = null })
+      .addCase(loginAsPanelMember.fulfilled, (state, action) => {
+        state.loading = false
+        state.isAuthenticated = true
+        state.token = action.payload.token
+        state.refreshToken = action.payload.refreshToken
+        state.user = action.payload.user
+        state.organizationId = action.payload.organizationId
+      })
+      .addCase(loginAsPanelMember.rejected, (state, action) => {
         state.loading = false
         state.error = action.payload as string
       })

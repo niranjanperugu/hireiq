@@ -21,10 +21,13 @@ import PanelCalendarPage    from '@pages/calendar/PanelCalendarPage'
 import JobApplyPage         from '@pages/apply/JobApplyPage'
 import SettingsPage         from '@pages/settings/SettingsPage'
 import SourcingPage         from '@pages/sourcing/SourcingPage'
-import IntegrationsPage     from '@pages/integrations/IntegrationsPage'
+import IntegrationsPage          from '@pages/integrations/IntegrationsPage'
+import PanelMemberPage          from '@pages/panel/PanelMemberPage'
+import PanelCandidateDetailPage from '@pages/panel/PanelCandidateDetailPage'
 
 function App() {
-  const { isAuthenticated } = useAppSelector(state => state.auth)
+  const { isAuthenticated, user } = useAppSelector(state => state.auth)
+  const isPanelMember = user?.role === 'PANEL_MEMBER'
 
   return (
     <Routes>
@@ -42,7 +45,7 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route index element={isPanelMember ? <Navigate to="/panel" replace /> : <DashboardPage />} />
 
         {/* Candidate routes */}
         <Route path="candidates"     element={<CandidatesPage />} />
@@ -65,6 +68,10 @@ function App() {
         <Route path="settings"      element={<SettingsPage />} />
         <Route path="sourcing"      element={<SourcingPage />} />
         <Route path="integrations"  element={<IntegrationsPage />} />
+
+        {/* Panel member routes */}
+        <Route path="panel"          element={<PanelMemberPage />} />
+        <Route path="panel/candidate/:candidateId/:jobId" element={<PanelCandidateDetailPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

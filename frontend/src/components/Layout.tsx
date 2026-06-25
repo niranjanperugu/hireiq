@@ -40,9 +40,11 @@ import {
   Schedule as ScheduleIcon,
   ManageSearch as AnalysisIcon,
   PersonSearch as PersonSearchIcon,
-  IntegrationInstructions as IntegrationIcon
+  IntegrationInstructions as IntegrationIcon,
+  AssignmentTurnedIn as MyInterviewsIcon,
 } from '@mui/icons-material'
 import { useNavigate, useLocation } from 'react-router-dom'
+import AIChatWidget from './AIChatWidget'
 
 const DRAWER_WIDTH = 260
 
@@ -58,6 +60,7 @@ const Layout: React.FC = () => {
   const isMobile   = useMediaQuery(theme.breakpoints.down('md'))
 
   const { user } = useAppSelector(state => state.auth)
+  const isPanelMember = user?.role === 'PANEL_MEMBER'
 
   const [openDrawer, setOpenDrawer] = useState(!isMobile)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
@@ -70,8 +73,17 @@ const Layout: React.FC = () => {
     navigate('/login')
   }
 
-  // Nav sections
-  const navSections = [
+  // Nav sections — role-based
+  const navSections = isPanelMember ? [
+    {
+      title: 'My Work',
+      items: [
+        { label: 'My Interviews',  icon: <MyInterviewsIcon />, path: '/panel' },
+        { label: 'Calendar',       icon: <CalendarIcon />,     path: '/calendar' },
+        { label: 'My Evaluations', icon: <EvalIcon />,         path: '/evaluations' },
+      ]
+    }
+  ] : [
     {
       title: 'Overview',
       items: [
@@ -233,6 +245,7 @@ const Layout: React.FC = () => {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', bgcolor: '#EEF0FF' }}>
+      <AIChatWidget />
 
       {/* ─── AppBar ─── */}
       <AppBar
@@ -261,7 +274,9 @@ const Layout: React.FC = () => {
 
           {/* Current page title */}
           <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '0.95rem', color: '#E2E8F0' }}>
-            {navItems.find(n => isActive(n.path))?.label ?? 'HireIQ'}
+            {location.pathname.startsWith('/panel/candidate')
+              ? 'Candidate Review'
+              : navItems.find(n => isActive(n.path))?.label ?? 'HireIQ'}
           </Typography>
 
           <Box sx={{ flex: 1 }} />
@@ -275,7 +290,7 @@ const Layout: React.FC = () => {
                   {user?.firstName} {user?.lastName}
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#475569', fontSize: '0.68rem' }}>
-                  Administrator
+                  {isPanelMember ? 'Panel Member' : 'Administrator'}
                 </Typography>
               </Box>
               <Avatar
