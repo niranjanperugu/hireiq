@@ -34,7 +34,6 @@ logs/
 .node_modules_cache/
 
 # Dependencies
-package-lock.json
 yarn.lock
 pom.xml.bak
 
@@ -70,3 +69,5 @@ secrets/
 *.key
 *.pem
 *.p12
+
+infrastructure/terraform/.terraform/providers/
