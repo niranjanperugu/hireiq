@@ -12,9 +12,10 @@ import {
   ArrowBack, AccountTree as PipelineIcon, Close, Search,
   CheckCircle, Cancel, Work, School, Schedule,
   PersonAddAlt1, VerifiedUser, Psychology, AssignmentTurnedIn,
-  ContentCopy, Launch, TrendingUp
+  ContentCopy, Launch, TrendingUp, SmartToy as SmartToyIcon
 } from '@mui/icons-material'
 import apiClient from '@services/apiClient'
+import { createInterviewLink } from '@services/interviewApi'
 import {
   loadPipeline, savePipeline, PipelineCandidate,
   loadEvaluations, Evaluation
@@ -116,17 +117,31 @@ const CandidateDialog: React.FC<{
   onClose: () => void
   candidate: AppliedCandidate | null
   jobId: string
+  jobTitle: string
+  jobDescription: string
   jobSkills: string[]
   onAddedToPipeline: () => void
-}> = ({ open, onClose, candidate, jobId, jobSkills, onAddedToPipeline }) => {
+}> = ({ open, onClose, candidate, jobId, jobTitle, jobDescription, jobSkills, onAddedToPipeline }) => {
   const [added,    setAdded]    = useState(false)
   const [toast,    setToast]    = useState('')
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null)
   const [evals,    setEvals]    = useState<Evaluation[]>([])
+  const [dialogTab, setDialogTab] = useState(0)
+
+  // Assessment state
+  const [assessmentDialog,   setAssessmentDialog]   = useState(false)
+  const [creatingAssessment, setCreatingAssessment] = useState(false)
+  const [assessmentLink,     setAssessmentLink]     = useState('')
+  const [emailSubject,       setEmailSubject]       = useState('')
+  const [emailBody,          setEmailBody]          = useState('')
+  const [assessmentLinkCopied, setAssessmentLinkCopied] = useState(false)
+  const [emailCopied,          setEmailCopied]          = useState(false)
+  const [pastAssessments,    setPastAssessments]    = useState<any[]>([])
 
   useEffect(() => {
     if (!candidate) return
     setAdded(false)
+    setDialogTab(0)
     const ps = getPipelineStatus(jobId, candidate.id, candidate.email)
     setPipeline(ps)
     const allEvals = loadEvaluations()
@@ -134,7 +149,50 @@ const CandidateDialog: React.FC<{
       e.jobId === jobId &&
       (e.candidateId === `applied_${candidate.id}` || e.candidateId === candidate.email)
     ))
+    // Fetch past assessments for this candidate
+    import('@services/assessmentApi').then(({ getAssessments }) => {
+      getAssessments(jobId, candidate.id)
+        .then(r => setPastAssessments(r.data ?? []))
+        .catch(() => setPastAssessments([]))
+    })
   }, [candidate, jobId, open])
+
+  const handleCreateAssessment = async () => {
+    if (!candidate) return
+    setCreatingAssessment(true)
+    setAssessmentDialog(true)
+    try {
+      const { createAssessment } = await import('@services/assessmentApi')
+      const { data } = await createAssessment({
+        jobId, jobTitle, jobDescription, skills: jobSkills,
+        candidateId:    candidate.id,
+        candidateName:  candidate.candidateName,
+        candidateEmail: candidate.email,
+        candidatePhone: candidate.phone ?? '',
+        candidateRole:  candidate.currentRole ?? '',
+      })
+      const fullLink = `${window.location.origin}${data.assessmentPath}`
+      setAssessmentLink(fullLink)
+      setEmailSubject(data.emailSubject)
+      setEmailBody((data.emailBody as string).replace('{ASSESSMENT_URL}', fullLink))
+    } catch {
+      setAssessmentLink('')
+    } finally {
+      setCreatingAssessment(false)
+    }
+  }
+
+  const copyAssessmentLink = () => {
+    navigator.clipboard.writeText(assessmentLink)
+    setAssessmentLinkCopied(true); setTimeout(() => setAssessmentLinkCopied(false), 2500)
+  }
+  const copyEmail = () => {
+    navigator.clipboard.writeText(`Subject: ${emailSubject}\n\n${emailBody}`)
+    setEmailCopied(true); setTimeout(() => setEmailCopied(false), 2500)
+  }
+  const openMailto = () => {
+    window.open(`mailto:${candidate?.email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`)
+  }
 
   const handleAdd = () => {
     if (!candidate) return
@@ -197,6 +255,16 @@ const CandidateDialog: React.FC<{
         </Box>
       </DialogTitle>
 
+      {/* Tabs */}
+      <Box sx={{ borderBottom: `1px solid ${NAVY_LT}`, bgcolor: NAVY, px: 3 }}>
+        <Tabs value={dialogTab} onChange={(_, v) => setDialogTab(v)}
+          sx={{ minHeight: 40, '& .MuiTab-root': { minHeight: 40, fontSize: '0.75rem', fontWeight: 600, textTransform: 'none', color: '#64748B', px: 2 },
+            '& .Mui-selected': { color: ORANGE }, '& .MuiTabs-indicator': { bgcolor: ORANGE } }}>
+          <Tab label="Overview" />
+          <Tab label="Application Flow" />
+        </Tabs>
+      </Box>
+
       <DialogContent sx={{ p: 3 }}>
         {toast && (
           <Alert severity="success" onClose={() => setToast('')}
@@ -205,82 +273,203 @@ const CandidateDialog: React.FC<{
           </Alert>
         )}
 
-        <Grid container spacing={2.5}>
-          {/* Left: details */}
-          <Grid item xs={12} md={7}>
-
-            {/* Pipeline status */}
-            <Box sx={{ bgcolor: NAVY, borderRadius: 2, p: 2, mb: 2, border: `1px solid ${NAVY_LT}` }}>
-              <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem' }}>
-                Pipeline Status
-              </Typography>
-              <Box display="flex" alignItems="center" gap={1.5} mt={0.75}>
-                {inPip ? (
-                  <>
-                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: pipeline?.stageColor ?? '#38BDF8', flexShrink: 0 }} />
-                    <Typography sx={{ fontWeight: 700, color: pipeline?.stageColor ?? '#38BDF8', fontSize: '0.9rem' }}>
-                      {pipeline?.stageLabel ?? 'Shortlisted'}
-                    </Typography>
-                    <Chip label="IN PIPELINE" size="small" sx={{ fontSize: '0.58rem', height: 18, fontWeight: 700,
-                      bgcolor: '#22C55E18', color: '#22C55E', ml: 'auto' }} />
-                  </>
-                ) : (
-                  <>
-                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#334155', flexShrink: 0 }} />
-                    <Typography sx={{ color: '#475569', fontSize: '0.9rem' }}>Not yet in pipeline</Typography>
-                    <Button size="small" variant="contained" startIcon={<PersonAddAlt1 sx={{ fontSize: '0.7rem !important' }} />}
-                      onClick={handleAdd}
-                      sx={{ ml: 'auto', fontSize: '0.7rem', py: 0.3, px: 1, bgcolor: ORANGE, '&:hover': { bgcolor: '#4338CA' } }}>
-                      Add to Pipeline
-                    </Button>
-                  </>
-                )}
+        {/* ── Tab 0: Overview ── */}
+        {dialogTab === 0 && (
+          <Grid container spacing={2.5}>
+            {/* Left: summary + meta */}
+            <Grid item xs={12} md={7}>
+              {/* Meta row */}
+              <Box display="flex" gap={1.5} flexWrap="wrap" mb={2}>
+                {[
+                  { icon: <Work sx={{ fontSize: '0.8rem' }} />, label: `${candidate.yearsOfExperience ?? 0} yrs experience` },
+                  { icon: <School sx={{ fontSize: '0.8rem' }} />, label: candidate.education || 'Education N/A' },
+                  { icon: <Schedule sx={{ fontSize: '0.8rem' }} />, label: new Date(candidate.analyzedAt).toLocaleDateString() },
+                ].map(m => (
+                  <Box key={m.label} display="flex" alignItems="center" gap={0.5}
+                    sx={{ bgcolor: NAVY, borderRadius: 1, px: 1.25, py: 0.5, border: `1px solid ${NAVY_LT}` }}>
+                    <Box sx={{ color: '#475569' }}>{m.icon}</Box>
+                    <Typography variant="caption" sx={{ color: '#94A3B8', fontSize: '0.72rem' }}>{m.label}</Typography>
+                  </Box>
+                ))}
               </Box>
-            </Box>
 
-            {/* Meta row */}
-            <Box display="flex" gap={1.5} flexWrap="wrap" mb={2}>
-              {[
-                { icon: <Work sx={{ fontSize: '0.8rem' }} />, label: `${candidate.yearsOfExperience ?? 0} yrs experience` },
-                { icon: <School sx={{ fontSize: '0.8rem' }} />, label: candidate.education || 'Education N/A' },
-                { icon: <Schedule sx={{ fontSize: '0.8rem' }} />, label: new Date(candidate.analyzedAt).toLocaleDateString() },
-              ].map(m => (
-                <Box key={m.label} display="flex" alignItems="center" gap={0.5}
-                  sx={{ bgcolor: NAVY, borderRadius: 1, px: 1.25, py: 0.5, border: `1px solid ${NAVY_LT}` }}>
-                  <Box sx={{ color: '#475569' }}>{m.icon}</Box>
-                  <Typography variant="caption" sx={{ color: '#94A3B8', fontSize: '0.72rem' }}>{m.label}</Typography>
+              {/* Professional summary */}
+              {candidate.professionalSummary && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem' }}>
+                    Professional Summary
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#94A3B8', fontSize: '0.78rem', lineHeight: 1.7, mt: 0.75 }}>
+                    {candidate.professionalSummary}
+                  </Typography>
                 </Box>
-              ))}
+              )}
+
+              {/* Contact */}
+              <Divider sx={{ borderColor: NAVY_LT, my: 2 }} />
+              <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem' }}>
+                Contact
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#94A3B8', fontSize: '0.78rem', mt: 0.5 }}>{candidate.email}</Typography>
+              {candidate.phone && <Typography variant="body2" sx={{ color: '#94A3B8', fontSize: '0.78rem' }}>{candidate.phone}</Typography>}
+            </Grid>
+
+            {/* Right: ATS + skills */}
+            <Grid item xs={12} md={5}>
+              <Box sx={{ bgcolor: NAVY, borderRadius: 2, p: 2, border: `1px solid ${NAVY_LT}`, mb: 2 }}>
+                <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem' }}>
+                  ATS Score Breakdown
+                </Typography>
+                <Box display="flex" alignItems="center" gap={2} mt={1} mb={1.5}>
+                  <ScoreRing score={Math.round(candidate.atsScore)} size={64} />
+                  <Box>
+                    <Typography sx={{ fontWeight: 800, fontSize: '1.1rem', color: scoreColor(candidate.atsScore) }}>
+                      {scoreLabel(candidate.atsScore)}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#475569' }}>
+                      {matched.length}/{matched.length + missing.length} skills matched
+                    </Typography>
+                  </Box>
+                </Box>
+                <LinearProgress variant="determinate" value={candidate.atsScore}
+                  sx={{ height: 6, borderRadius: 3, bgcolor: NAVY_LT,
+                    '& .MuiLinearProgress-bar': { bgcolor: scoreColor(candidate.atsScore), borderRadius: 3 } }} />
+              </Box>
+
+              {matched.length > 0 && (
+                <Box mb={2}>
+                  <Box display="flex" alignItems="center" gap={0.75} mb={0.75}>
+                    <CheckCircle sx={{ fontSize: '0.85rem', color: '#22C55E' }} />
+                    <Typography variant="caption" sx={{ color: '#22C55E', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Matched Skills ({matched.length})
+                    </Typography>
+                  </Box>
+                  <Box display="flex" flexWrap="wrap" gap={0.5}>
+                    {matched.map(sk => (
+                      <Chip key={sk} label={sk} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#22C55E18', color: '#22C55E', border: '1px solid #22C55E33' }} />
+                    ))}
+                  </Box>
+                </Box>
+              )}
+
+              {missing.length > 0 && (
+                <Box>
+                  <Box display="flex" alignItems="center" gap={0.75} mb={0.75}>
+                    <Cancel sx={{ fontSize: '0.85rem', color: '#EF4444' }} />
+                    <Typography variant="caption" sx={{ color: '#EF4444', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Missing Skills ({missing.length})
+                    </Typography>
+                  </Box>
+                  <Box display="flex" flexWrap="wrap" gap={0.5}>
+                    {missing.map(sk => (
+                      <Chip key={sk} label={sk} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#EF444418', color: '#EF4444', border: '1px solid #EF444433' }} />
+                    ))}
+                  </Box>
+                </Box>
+              )}
+            </Grid>
+          </Grid>
+        )}
+
+        {/* ── Tab 1: Application Flow ── */}
+        {dialogTab === 1 && (
+          <Box>
+            {/* Pipeline status strip */}
+            <Box sx={{ bgcolor: NAVY, borderRadius: 2, p: 1.75, mb: 2.5, border: `1px solid ${NAVY_LT}`, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: inPip ? (pipeline?.stageColor ?? '#22C55E') : '#334155', flexShrink: 0 }} />
+              <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: inPip ? (pipeline?.stageColor ?? '#22C55E') : '#475569' }}>
+                {inPip ? (pipeline?.stageLabel ?? 'In Pipeline') : 'Not yet in pipeline'}
+              </Typography>
+              {inPip && <Chip label="IN PIPELINE" size="small" sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, bgcolor: '#22C55E18', color: '#22C55E', ml: 'auto' }} />}
             </Box>
 
-            {/* Professional summary */}
-            {candidate.professionalSummary && (
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem' }}>
-                  Professional Summary
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#94A3B8', fontSize: '0.78rem', lineHeight: 1.7, mt: 0.75 }}>
-                  {candidate.professionalSummary}
-                </Typography>
-              </Box>
-            )}
+            {/* ── Action buttons row ── */}
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
+              {!inPip && (
+                <Button variant="contained" size="small"
+                  startIcon={<PersonAddAlt1 sx={{ fontSize: '0.8rem !important' }} />}
+                  onClick={handleAdd}
+                  sx={{ fontSize: '0.75rem', py: 0.6, px: 1.5, bgcolor: ORANGE, fontWeight: 600, textTransform: 'none',
+                    '&:hover': { bgcolor: '#4338CA' } }}>
+                  Add to Pipeline
+                </Button>
+              )}
+              <Button variant="outlined" size="small"
+                startIcon={<AssignmentTurnedIn sx={{ fontSize: '0.8rem !important' }} />}
+                onClick={handleCreateAssessment}
+                sx={{ fontSize: '0.75rem', py: 0.6, px: 1.5, fontWeight: 600, textTransform: 'none',
+                  borderColor: '#818CF8', color: '#6366F1', '&:hover': { borderColor: '#6366F1', bgcolor: '#EEF2FF' } }}>
+                Create Assessment
+              </Button>
+              <Button variant="outlined" size="small"
+                startIcon={<SmartToyIcon sx={{ fontSize: '0.8rem !important' }} />}
+                onClick={() => {/* AI Interview handled via header button */}}
+                sx={{ fontSize: '0.75rem', py: 0.6, px: 1.5, fontWeight: 600, textTransform: 'none',
+                  borderColor: '#A5B4FC', color: '#6366F1', '&:hover': { borderColor: '#6366F1', bgcolor: '#EEF2FF' } }}>
+                AI Interview
+              </Button>
+            </Box>
 
-            {/* Evaluations */}
+            {/* ── Assessments ── */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem', fontWeight: 700, display: 'block', mb: 1 }}>
+                Assessments
+              </Typography>
+              {pastAssessments.length === 0
+                ? (
+                  <Box sx={{ bgcolor: NAVY, borderRadius: 1.5, p: 2, border: `1px dashed ${NAVY_LT}`, textAlign: 'center' }}>
+                    <AssignmentTurnedIn sx={{ fontSize: 28, color: '#CBD5E1', mb: 0.5 }} />
+                    <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block' }}>No assessments sent yet</Typography>
+                    <Typography variant="caption" sx={{ color: '#CBD5E1', fontSize: '0.65rem' }}>Click "Create Assessment" above to get started</Typography>
+                  </Box>
+                )
+                : pastAssessments.map((a: any) => (
+                  <Box key={a.token} sx={{ bgcolor: NAVY, borderRadius: 1.5, p: 1.5, mb: 1, border: `1px solid ${NAVY_LT}`, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box flex={1}>
+                      <Box display="flex" gap={0.75} alignItems="center" mb={0.25}>
+                        <Chip label={a.status} size="small" sx={{ height: 18, fontSize: '0.6rem', fontWeight: 700,
+                          bgcolor: a.status === 'COMPLETED' ? '#22C55E18' : a.status === 'IN_PROGRESS' ? '#3B82F618' : '#F59E0B18',
+                          color:   a.status === 'COMPLETED' ? '#22C55E'   : a.status === 'IN_PROGRESS' ? '#3B82F6'   : '#F59E0B' }} />
+                        {a.overallScore != null && (
+                          <Typography variant="caption" sx={{ color: '#1E293B', fontWeight: 700, fontSize: '0.72rem' }}>Score: {a.overallScore}/100</Typography>
+                        )}
+                        {a.recommendation && (
+                          <Chip label={a.recommendation} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: '#EEF2FF', color: '#4F46E5', fontWeight: 600 }} />
+                        )}
+                      </Box>
+                      <Typography variant="caption" sx={{ color: '#64748B', fontSize: '0.65rem' }}>
+                        {a.completedAt ? `Completed ${new Date(a.completedAt).toLocaleDateString()}` : `Created ${new Date(a.createdAt).toLocaleDateString()}`}
+                      </Typography>
+                    </Box>
+                    {a.status === 'COMPLETED' && (
+                      <Button size="small" variant="outlined"
+                        startIcon={<Launch sx={{ fontSize: '0.7rem !important' }} />}
+                        onClick={() => window.open(`/assessment/${a.token}/results`, '_blank')}
+                        sx={{ fontSize: '0.65rem', color: '#6366F1', borderColor: '#C7D2FE', py: 0.3, px: 0.75, textTransform: 'none' }}>
+                        Open
+                      </Button>
+                    )}
+                  </Box>
+                ))
+              }
+            </Box>
+
+            {/* ── Interview Evaluations ── */}
             {evals.length > 0 && (
               <Box>
-                <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem' }}>
+                <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem', fontWeight: 700, display: 'block', mb: 1 }}>
                   Interview Evaluations ({evals.length})
                 </Typography>
                 {evals.map(ev => (
-                  <Box key={ev.id} sx={{ bgcolor: NAVY, borderRadius: 1.5, p: 1.5, mt: 0.75, border: `1px solid ${NAVY_LT}` }}>
+                  <Box key={ev.id} sx={{ bgcolor: NAVY, borderRadius: 1.5, p: 1.5, mb: 1, border: `1px solid ${NAVY_LT}` }}>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.5}>
                       <Typography variant="caption" sx={{ color: '#1E293B', fontWeight: 600, fontSize: '0.75rem' }}>
                         {ev.stageName} · {ev.panelMember}
                       </Typography>
                       <Chip label={ev.recommendation} size="small" sx={{
-                        height: 16, fontSize: '0.58rem', fontWeight: 700,
+                        height: 18, fontSize: '0.6rem', fontWeight: 700,
                         bgcolor: ev.recommendation === 'ADVANCE' ? '#22C55E18' : ev.recommendation === 'HIRE' ? '#38BDF818' : ev.recommendation === 'REJECT' ? '#EF444418' : '#F59E0B18',
-                        color:   ev.recommendation === 'ADVANCE' ? '#22C55E' : ev.recommendation === 'HIRE' ? '#38BDF8' : ev.recommendation === 'REJECT' ? '#EF4444' : '#F59E0B',
+                        color:   ev.recommendation === 'ADVANCE' ? '#22C55E'   : ev.recommendation === 'HIRE' ? '#38BDF8'   : ev.recommendation === 'REJECT' ? '#EF4444'   : '#F59E0B',
                       }} />
                     </Box>
                     <Typography variant="caption" sx={{ color: '#64748B', fontSize: '0.7rem' }}>
@@ -290,74 +479,80 @@ const CandidateDialog: React.FC<{
                 ))}
               </Box>
             )}
-          </Grid>
-
-          {/* Right: skills */}
-          <Grid item xs={12} md={5}>
-            <Box sx={{ bgcolor: NAVY, borderRadius: 2, p: 2, border: `1px solid ${NAVY_LT}`, mb: 2 }}>
-              <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem' }}>
-                ATS Score Breakdown
-              </Typography>
-              <Box display="flex" alignItems="center" gap={2} mt={1} mb={1.5}>
-                <ScoreRing score={Math.round(candidate.atsScore)} size={64} />
-                <Box>
-                  <Typography sx={{ fontWeight: 800, fontSize: '1.1rem', color: scoreColor(candidate.atsScore) }}>
-                    {scoreLabel(candidate.atsScore)}
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: '#475569' }}>
-                    {matched.length}/{matched.length + missing.length} skills matched
-                  </Typography>
-                </Box>
-              </Box>
-              <LinearProgress variant="determinate" value={candidate.atsScore}
-                sx={{ height: 6, borderRadius: 3, bgcolor: NAVY_LT,
-                  '& .MuiLinearProgress-bar': { bgcolor: scoreColor(candidate.atsScore), borderRadius: 3 } }} />
-            </Box>
-
-            {/* Matched skills */}
-            {matched.length > 0 && (
-              <Box mb={2}>
-                <Box display="flex" alignItems="center" gap={0.75} mb={0.75}>
-                  <CheckCircle sx={{ fontSize: '0.85rem', color: '#22C55E' }} />
-                  <Typography variant="caption" sx={{ color: '#22C55E', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Matched Skills ({matched.length})
-                  </Typography>
-                </Box>
-                <Box display="flex" flexWrap="wrap" gap={0.5}>
-                  {matched.map(sk => (
-                    <Chip key={sk} label={sk} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#22C55E18', color: '#22C55E', border: '1px solid #22C55E33' }} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {/* Missing skills */}
-            {missing.length > 0 && (
-              <Box>
-                <Box display="flex" alignItems="center" gap={0.75} mb={0.75}>
-                  <Cancel sx={{ fontSize: '0.85rem', color: '#EF4444' }} />
-                  <Typography variant="caption" sx={{ color: '#EF4444', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Missing Skills ({missing.length})
-                  </Typography>
-                </Box>
-                <Box display="flex" flexWrap="wrap" gap={0.5}>
-                  {missing.map(sk => (
-                    <Chip key={sk} label={sk} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#EF444418', color: '#EF4444', border: '1px solid #EF444433' }} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {/* Contact */}
-            <Divider sx={{ borderColor: NAVY_LT, my: 2 }} />
-            <Typography variant="caption" sx={{ color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.6rem' }}>
-              Contact
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#94A3B8', fontSize: '0.78rem', mt: 0.5 }}>{candidate.email}</Typography>
-            {candidate.phone && <Typography variant="body2" sx={{ color: '#94A3B8', fontSize: '0.78rem' }}>{candidate.phone}</Typography>}
-          </Grid>
-        </Grid>
+          </Box>
+        )}
       </DialogContent>
+
+      {/* Assessment Email Dialog */}
+      <Dialog open={assessmentDialog} onClose={() => { setAssessmentDialog(false); setAssessmentLink(''); setEmailCopied(false); setAssessmentLinkCopied(false) }}
+        maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pb: 1 }}>
+          <AssignmentTurnedIn sx={{ color: '#6366F1' }} />
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>Assessment Invitation</Typography>
+          <IconButton onClick={() => setAssessmentDialog(false)} sx={{ ml: 'auto' }}><Close /></IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 0 }}>
+          {creatingAssessment ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 3, gap: 2 }}>
+              <CircularProgress sx={{ color: '#6366F1' }} />
+              <Typography variant="body2" sx={{ color: '#64748B' }}>Generating assessment link…</Typography>
+            </Box>
+          ) : assessmentLink ? (
+            <Box>
+              <Alert severity="success" sx={{ mb: 2 }}>
+                Assessment link created for <strong>{candidate?.candidateName}</strong>. Share it via email.
+              </Alert>
+
+              {/* Link row */}
+              <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, display: 'block', mb: 0.5 }}>Assessment Link</Typography>
+              <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', p: 1.25, bgcolor: '#F8FAFC', borderRadius: 1.5, border: '1px solid #E2E8F0', mb: 2 }}>
+                <Typography variant="body2" sx={{ flex: 1, wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '0.72rem', color: '#1E293B' }}>
+                  {assessmentLink}
+                </Typography>
+                <Tooltip title={assessmentLinkCopied ? 'Copied!' : 'Copy link'}>
+                  <IconButton size="small" onClick={copyAssessmentLink} sx={{ color: assessmentLinkCopied ? '#22C55E' : '#6366F1', flexShrink: 0 }}>
+                    {assessmentLinkCopied ? <CheckCircle fontSize="small" /> : <ContentCopy fontSize="small" />}
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Open in new tab">
+                  <IconButton size="small" onClick={() => window.open(assessmentLink, '_blank')} sx={{ color: '#64748B', flexShrink: 0 }}>
+                    <Launch fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+
+              {/* Email preview */}
+              <Typography variant="caption" sx={{ color: '#475569', fontWeight: 600, display: 'block', mb: 0.5 }}>Email Preview</Typography>
+              <Box sx={{ p: 1.5, bgcolor: '#F8FAFC', borderRadius: 1.5, border: '1px solid #E2E8F0', mb: 1.5, maxHeight: 200, overflow: 'auto' }}>
+                <Typography variant="caption" sx={{ color: '#64748B', display: 'block', mb: 0.5 }}>
+                  <strong>To:</strong> {candidate?.email}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#64748B', display: 'block', mb: 1 }}>
+                  <strong>Subject:</strong> {emailSubject}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#374151', whiteSpace: 'pre-wrap', display: 'block', lineHeight: 1.7 }}>
+                  {emailBody}
+                </Typography>
+              </Box>
+
+              <Box display="flex" gap={1}>
+                <Tooltip title={emailCopied ? 'Copied!' : 'Copy email text'}>
+                  <Button size="small" variant="outlined" startIcon={emailCopied ? <CheckCircle /> : <ContentCopy />}
+                    onClick={copyEmail} sx={{ flex: 1, borderColor: NAVY_LT, color: '#475569', fontSize: '0.72rem' }}>
+                    {emailCopied ? 'Copied!' : 'Copy Email'}
+                  </Button>
+                </Tooltip>
+                <Button size="small" variant="contained" startIcon={<Launch />}
+                  onClick={openMailto} sx={{ flex: 1, bgcolor: '#6366F1', '&:hover': { bgcolor: '#4F46E5' }, fontSize: '0.72rem' }}>
+                  Open Email Client
+                </Button>
+              </Box>
+            </Box>
+          ) : (
+            <Alert severity="error">Failed to create assessment link. Please try again.</Alert>
+          )}
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }
@@ -378,6 +573,12 @@ const JobDetailPage: React.FC = () => {
   const [selected,  setSelected]  = useState<AppliedCandidate | null>(null)
   const [linkCopied,setLinkCopied]= useState(false)
   const [version,   setVersion]   = useState(0)   // bump to re-derive pipeline status
+
+  // AI Interview link state
+  const [interviewDialog,  setInterviewDialog]  = useState(false)
+  const [generatingLink,   setGeneratingLink]   = useState(false)
+  const [generatedLink,    setGeneratedLink]    = useState('')
+  const [interviewLinkCopied, setInterviewLinkCopied] = useState(false)
 
   useEffect(() => {
     if (organizationId && id) dispatch(getJobById({ organizationId, jobId: id }))
@@ -417,6 +618,32 @@ const JobDetailPage: React.FC = () => {
     navigator.clipboard.writeText(`${window.location.origin}/apply/${id}`)
     setLinkCopied(true)
     setTimeout(() => setLinkCopied(false), 2000)
+  }
+
+  const handleCreateInterviewLink = async () => {
+    if (!selectedJob || !id) return
+    setGeneratingLink(true)
+    setInterviewDialog(true)
+    try {
+      const { data } = await createInterviewLink({
+        jobId:          id,
+        jobTitle:       selectedJob.title,
+        jobDescription: selectedJob.description ?? '',
+        skills:         jobSkills,
+      })
+      setGeneratedLink(`${window.location.origin}${data.interviewPath}`)
+    } catch {
+      setGeneratedLink('')
+    } finally {
+      setGeneratingLink(false)
+    }
+  }
+
+  const copyInterviewLink = () => {
+    if (!generatedLink) return
+    navigator.clipboard.writeText(generatedLink)
+    setInterviewLinkCopied(true)
+    setTimeout(() => setInterviewLinkCopied(false), 2500)
   }
 
   const SH = {
@@ -482,6 +709,11 @@ const JobDetailPage: React.FC = () => {
             sx={{ borderColor: NAVY_LT, color: '#64748B', '&:hover': { borderColor: '#38BDF8', color: '#38BDF8' } }}>
             Preview
           </Button>
+          <Button variant="outlined" size="small" startIcon={<SmartToyIcon />}
+            onClick={handleCreateInterviewLink}
+            sx={{ borderColor: '#818CF8', color: '#6366F1', '&:hover': { borderColor: '#6366F1', bgcolor: '#EEF2FF' }, fontWeight: 700 }}>
+            AI Interview
+          </Button>
           <Button variant="contained" size="small" startIcon={<PipelineIcon />}
             onClick={() => navigate(`/jobs/${selectedJob.id}/pipeline`)}
             sx={{ bgcolor: ORANGE, '&:hover': { bgcolor: '#4338CA' }, fontWeight: 700 }}>
@@ -489,6 +721,48 @@ const JobDetailPage: React.FC = () => {
           </Button>
         </Box>
       </Box>
+
+      {/* AI Interview Link Dialog */}
+      <Dialog open={interviewDialog} onClose={() => { setInterviewDialog(false); setGeneratedLink(''); setInterviewLinkCopied(false) }} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { borderRadius: 3 } }}>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pb: 1 }}>
+          <SmartToyIcon sx={{ color: '#6366F1' }} />
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>AI Interview Link</Typography>
+          <IconButton onClick={() => { setInterviewDialog(false); setGeneratedLink('') }} sx={{ ml: 'auto' }}><Close /></IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {generatingLink ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 3, gap: 2 }}>
+              <CircularProgress sx={{ color: '#6366F1' }} />
+              <Typography variant="body2" sx={{ color: '#64748B' }}>Generating interview link…</Typography>
+            </Box>
+          ) : generatedLink ? (
+            <Box>
+              <Alert severity="success" sx={{ mb: 2 }}>Link generated! Share with the candidate — expires in 7 days or after completion.</Alert>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', p: 1.5, bgcolor: '#F8FAFC', borderRadius: 2, border: '1px solid #E2E8F0' }}>
+                <Typography variant="body2" sx={{ flex: 1, wordBreak: 'break-all', color: '#1E293B', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                  {generatedLink}
+                </Typography>
+                <Tooltip title={interviewLinkCopied ? 'Copied!' : 'Copy link'}>
+                  <IconButton size="small" onClick={copyInterviewLink} sx={{ color: interviewLinkCopied ? '#22C55E' : '#6366F1', flexShrink: 0 }}>
+                    {interviewLinkCopied ? <CheckCircle fontSize="small" /> : <ContentCopy fontSize="small" />}
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Open in new tab">
+                  <IconButton size="small" onClick={() => window.open(generatedLink, '_blank')} sx={{ color: '#64748B', flexShrink: 0 }}>
+                    <Launch fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: '#94A3B8' }}>
+                • 10 AI-generated questions tailored to this job • 30-minute time limit • Answers are voice or text • Link expires after use
+              </Typography>
+            </Box>
+          ) : (
+            <Alert severity="error">Failed to generate link. Please try again.</Alert>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Overview card */}
       <Card sx={{ bgcolor: NAVY_MID, border: `1px solid ${NAVY_LT}`, borderRadius: 2, mb: 2 }}>
@@ -769,6 +1043,8 @@ const JobDetailPage: React.FC = () => {
         onClose={() => setSelected(null)}
         candidate={selected}
         jobId={id!}
+        jobTitle={selectedJob?.title ?? ''}
+        jobDescription={selectedJob?.description ?? ''}
         jobSkills={jobSkills}
         onAddedToPipeline={() => setVersion(v => v + 1)}
       />

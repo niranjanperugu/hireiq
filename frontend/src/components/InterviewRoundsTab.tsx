@@ -688,6 +688,52 @@ export default function InterviewRoundsTab({
   const [showAddRound,  setShowAddRound]  = useState(false)
   const [showNoteForm,  setShowNoteForm]  = useState(false)
 
+  // ── Assessment ────────────────────────────────────────────────────────────
+  const [assessmentDialogOpen,  setAssessmentDialogOpen]  = useState(false)
+  const [creatingAssessment,    setCreatingAssessment]    = useState(false)
+  const [assessmentLink,        setAssessmentLink]        = useState('')
+  const [assessmentEmailSubject,setAssessmentEmailSubject]= useState('')
+  const [assessmentEmailBody,   setAssessmentEmailBody]   = useState('')
+  const [assessmentLinkCopied,  setAssessmentLinkCopied]  = useState(false)
+  const [assessmentEmailCopied, setAssessmentEmailCopied] = useState(false)
+  const [pastAssessments,       setPastAssessments]       = useState<any[]>([])
+  const [assessmentsLoaded,     setAssessmentsLoaded]     = useState(false)
+
+  useEffect(()=>{
+    if (!candidateId || !jobId) return
+    import('@services/assessmentApi').then(({ getAssessments })=>{
+      getAssessments(jobId, candidateId)
+        .then(r => { setPastAssessments(r.data ?? []); setAssessmentsLoaded(true) })
+        .catch(()=>{ setPastAssessments([]); setAssessmentsLoaded(true) })
+    })
+  },[candidateId,jobId])
+
+  const handleCreateAssessment = async () => {
+    setCreatingAssessment(true)
+    setAssessmentDialogOpen(true)
+    setAssessmentLink('')
+    try {
+      const { createAssessment } = await import('@services/assessmentApi')
+      const { data } = await createAssessment({
+        jobId, jobTitle, skills: [],
+        candidateId, candidateName,
+        candidateEmail: candidateEmail ?? '',
+        candidatePhone: '',
+        candidateRole:  candidateRole ?? '',
+        jobDescription: '',
+      })
+      const fullLink = `${window.location.origin}${data.assessmentPath}`
+      setAssessmentLink(fullLink)
+      setAssessmentEmailSubject(data.emailSubject)
+      setAssessmentEmailBody((data.emailBody as string).replace('{ASSESSMENT_URL}', fullLink))
+      setPastAssessments(prev => [{ token: data.token, status: 'PENDING', createdAt: new Date().toISOString() }, ...prev])
+    } catch {
+      setAssessmentLink('')
+    } finally {
+      setCreatingAssessment(false)
+    }
+  }
+
   // ── Shortlist record (read-only, for timeline display) ────────────────────
   const [shortlistRecord, setShortlistRecord] = useState<ShortlistRecord|null>(null)
 
@@ -1264,6 +1310,15 @@ export default function InterviewRoundsTab({
             '&:hover':{bgcolor:ORANGE+'08',borderColor:ORANGE}}}>
           Send Email
         </Button>
+
+        <Button variant="outlined"
+          startIcon={<AssignmentTurnedIn sx={{fontSize:14}}/>}
+          onClick={handleCreateAssessment}
+          sx={{fontSize:13,textTransform:'none',fontWeight:600,
+            borderColor:'#818CF8',color:'#6366F1',
+            '&:hover':{bgcolor:'#EEF2FF',borderColor:'#6366F1'}}}>
+          Create Assessment
+        </Button>
       </Box>
 
       {/* ── APPLICATION FLOW TIMELINE ──────────────────────────────────────── */}
@@ -1558,6 +1613,141 @@ export default function InterviewRoundsTab({
           </Button>
         </Box>
       )}
+
+      {/* ── ASSESSMENTS ───────────────────────────────────────────────────── */}
+      <Box sx={{mt:3}}>
+        <Box sx={{display:'flex',alignItems:'center',justifyContent:'space-between',mb:1.5}}>
+          <Typography sx={{fontSize:10,fontWeight:700,color:TEXT3,textTransform:'uppercase',letterSpacing:'0.1em'}}>
+            Assessments
+          </Typography>
+          {pastAssessments.length > 0 && (
+            <Chip label={pastAssessments.length} size="small"
+              sx={{height:18,fontSize:10,bgcolor:'#EEF2FF',color:'#6366F1',fontWeight:700}}/>
+          )}
+        </Box>
+        {!assessmentsLoaded ? null : pastAssessments.length === 0 ? (
+          <Box sx={{textAlign:'center',py:3,bgcolor:BG,borderRadius:2,border:`1px dashed ${BORDER}`}}>
+            <AssignmentTurnedIn sx={{fontSize:32,color:TEXT3,mb:0.5}}/>
+            <Typography sx={{color:TEXT2,fontSize:12}}>No assessments sent yet</Typography>
+            <Typography sx={{fontSize:11,color:TEXT3,mt:0.25}}>Click "Create Assessment" above to send one</Typography>
+          </Box>
+        ) : pastAssessments.map((a:any) => (
+          <Box key={a.token} sx={{display:'flex',alignItems:'center',gap:1.5,p:1.5,mb:1,
+            bgcolor:CARD,borderRadius:1.5,border:`1px solid ${BORDER}`}}>
+            <AssignmentTurnedIn sx={{fontSize:18,color:'#6366F1',flexShrink:0}}/>
+            <Box flex={1}>
+              <Box sx={{display:'flex',gap:0.75,alignItems:'center',flexWrap:'wrap',mb:0.25}}>
+                <Chip label={a.status} size="small" sx={{height:18,fontSize:10,fontWeight:700,
+                  bgcolor: a.status==='COMPLETED'?'#22C55E18':a.status==='IN_PROGRESS'?'#3B82F618':'#F59E0B18',
+                  color:   a.status==='COMPLETED'?'#22C55E':a.status==='IN_PROGRESS'?'#3B82F6':'#F59E0B'}}/>
+                {a.overallScore!=null&&<Typography sx={{fontSize:12,fontWeight:700,color:TEXT1}}>Score: {a.overallScore}/100</Typography>}
+                {a.recommendation&&<Chip label={a.recommendation} size="small"
+                  sx={{height:18,fontSize:10,bgcolor:'#EEF2FF',color:'#4F46E5',fontWeight:600}}/>}
+              </Box>
+              <Typography sx={{fontSize:11,color:TEXT3}}>
+                {a.completedAt
+                  ? `Completed ${new Date(a.completedAt).toLocaleDateString()}`
+                  : `Created ${new Date(a.createdAt).toLocaleDateString()}`}
+              </Typography>
+            </Box>
+            {a.status==='COMPLETED'&&(
+              <Button size="small" variant="outlined"
+                startIcon={<OpenInNew sx={{fontSize:13}}/>}
+                onClick={()=>window.open(`/assessment/${a.token}/results`,'_blank')}
+                sx={{fontSize:12,textTransform:'none',color:'#6366F1',borderColor:'#C7D2FE',
+                  flexShrink:0,'&:hover':{bgcolor:'#EEF2FF'}}}>
+                Open
+              </Button>
+            )}
+          </Box>
+        ))}
+      </Box>
+
+      {/* ── ASSESSMENT EMAIL DIALOG ────────────────────────────────────────── */}
+      <Dialog open={assessmentDialogOpen}
+        onClose={()=>{setAssessmentDialogOpen(false);setAssessmentLink('');setAssessmentLinkCopied(false);setAssessmentEmailCopied(false)}}
+        maxWidth="sm" fullWidth PaperProps={{sx:{borderRadius:2.5}}}>
+        <DialogTitle sx={{display:'flex',alignItems:'center',gap:1.5,pb:1,borderBottom:`1px solid ${BORDER}`}}>
+          <AssignmentTurnedIn sx={{color:'#6366F1',fontSize:22}}/>
+          <Typography sx={{fontWeight:700,fontSize:16,color:TEXT1}}>Assessment Invitation</Typography>
+          <IconButton onClick={()=>setAssessmentDialogOpen(false)} sx={{ml:'auto',color:TEXT2}}><Cancel sx={{fontSize:18}}/></IconButton>
+        </DialogTitle>
+        <DialogContent sx={{pt:2}}>
+          {creatingAssessment ? (
+            <Box sx={{display:'flex',flexDirection:'column',alignItems:'center',py:4,gap:2}}>
+              <Box sx={{width:40,height:40,borderRadius:'50%',bgcolor:'#EEF2FF',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <AssignmentTurnedIn sx={{color:'#6366F1',fontSize:22}}/>
+              </Box>
+              <Typography sx={{color:TEXT2,fontSize:13}}>Generating assessment link…</Typography>
+            </Box>
+          ) : assessmentLink ? (
+            <Box>
+              <Box sx={{p:1.5,bgcolor:'#F0FDF4',borderRadius:1.5,border:'1px solid #BBF7D0',mb:2}}>
+                <Typography sx={{fontSize:12,color:'#166534'}}>
+                  Assessment link created for <strong>{candidateName}</strong>. Share it via email below.
+                </Typography>
+              </Box>
+
+              <Typography sx={{fontSize:11,fontWeight:700,color:TEXT3,mb:0.5}}>ASSESSMENT LINK</Typography>
+              <Box sx={{display:'flex',gap:0.75,alignItems:'center',p:1.25,bgcolor:BG,
+                borderRadius:1.5,border:`1px solid ${BORDER}`,mb:2}}>
+                <Typography sx={{flex:1,wordBreak:'break-all',fontFamily:'monospace',fontSize:11,color:TEXT1}}>
+                  {assessmentLink}
+                </Typography>
+                <Tooltip title={assessmentLinkCopied?'Copied!':'Copy link'}>
+                  <IconButton size="small"
+                    onClick={()=>{navigator.clipboard.writeText(assessmentLink);setAssessmentLinkCopied(true);setTimeout(()=>setAssessmentLinkCopied(false),2500)}}
+                    sx={{color:assessmentLinkCopied?'#22C55E':'#6366F1',flexShrink:0}}>
+                    <ContentCopy sx={{fontSize:16}}/>
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Open in new tab">
+                  <IconButton size="small" onClick={()=>window.open(assessmentLink,'_blank')} sx={{color:TEXT2,flexShrink:0}}>
+                    <OpenInNew sx={{fontSize:16}}/>
+                  </IconButton>
+                </Tooltip>
+              </Box>
+
+              <Typography sx={{fontSize:11,fontWeight:700,color:TEXT3,mb:0.5}}>EMAIL PREVIEW</Typography>
+              <Box sx={{p:1.5,bgcolor:BG,borderRadius:1.5,border:`1px solid ${BORDER}`,mb:2,maxHeight:180,overflow:'auto'}}>
+                <Typography sx={{fontSize:11,color:TEXT3,display:'block',mb:0.5}}>
+                  <strong>To:</strong> {candidateName} &lt;{candidateEmail ?? 'No email on file'}&gt;
+                </Typography>
+                <Typography sx={{fontSize:11,color:TEXT3,display:'block',mb:1}}>
+                  <strong>Subject:</strong> {assessmentEmailSubject}
+                </Typography>
+                <Typography sx={{fontSize:11,color:TEXT1,whiteSpace:'pre-wrap',lineHeight:1.7}}>
+                  {assessmentEmailBody}
+                </Typography>
+              </Box>
+
+              <Box sx={{display:'flex',gap:1}}>
+                <Button fullWidth variant="outlined" size="small"
+                  startIcon={<ContentCopy sx={{fontSize:14}}/>}
+                  onClick={()=>{
+                    navigator.clipboard.writeText(`Subject: ${assessmentEmailSubject}\n\n${assessmentEmailBody}`)
+                    setAssessmentEmailCopied(true); setTimeout(()=>setAssessmentEmailCopied(false),2500)
+                  }}
+                  sx={{fontSize:12,textTransform:'none',borderColor:BORDER,color:TEXT2}}>
+                  {assessmentEmailCopied?'Copied!':'Copy Email'}
+                </Button>
+                <Button fullWidth variant="contained" size="small"
+                  startIcon={<Send sx={{fontSize:14}}/>}
+                  onClick={()=>window.open(
+                    `mailto:${candidateEmail}?subject=${encodeURIComponent(assessmentEmailSubject)}&body=${encodeURIComponent(assessmentEmailBody)}`
+                  )}
+                  sx={{fontSize:12,textTransform:'none',fontWeight:700,bgcolor:'#6366F1','&:hover':{bgcolor:'#4F46E5'}}}>
+                  Open Email Client
+                </Button>
+              </Box>
+            </Box>
+          ) : (
+            <Box sx={{p:2,bgcolor:'#FEF2F2',borderRadius:1.5,border:'1px solid #FECACA'}}>
+              <Typography sx={{fontSize:12,color:'#DC2626'}}>Failed to create assessment link. Please try again.</Typography>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ── HR ACTION EMAIL DIALOG ────────────────────────────────────────── */}
       <Dialog open={!!actionType} onClose={()=>setActionType(null)} maxWidth="sm" fullWidth

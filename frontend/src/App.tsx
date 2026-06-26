@@ -19,6 +19,9 @@ import SchedulePage         from '@pages/schedule/SchedulePage'
 import EvaluationsListPage  from '@pages/evaluations/EvaluationsListPage'
 import PanelCalendarPage    from '@pages/calendar/PanelCalendarPage'
 import JobApplyPage         from '@pages/apply/JobApplyPage'
+import AIInterviewPage        from '@pages/interview/AIInterviewPage'
+import AssessmentPage         from '@pages/assessment/AssessmentPage'
+import AssessmentResultsPage  from '@pages/assessment/AssessmentResultsPage'
 import SettingsPage         from '@pages/settings/SettingsPage'
 import SourcingPage         from '@pages/sourcing/SourcingPage'
 import IntegrationsPage          from '@pages/integrations/IntegrationsPage'
@@ -32,7 +35,10 @@ function App() {
   return (
     <Routes>
       {/* Public routes — no auth required */}
-      <Route path="/apply/:jobId" element={<JobApplyPage />} />
+      <Route path="/apply/:jobId"     element={<JobApplyPage />} />
+      <Route path="/interview/:token"            element={<AIInterviewPage />} />
+      <Route path="/assessment/:token"          element={<AssessmentPage />} />
+      <Route path="/assessment/:token/results"  element={<AssessmentResultsPage />} />
 
       <Route path="/login"    element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />

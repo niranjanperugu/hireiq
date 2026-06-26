@@ -47,4 +47,18 @@ public class Enums {
     public enum DeliveryStatus {
         SENT, FAILED, BOUNCED
     }
+
+    public enum AIInterviewStatus {
+        PENDING,
+        IN_PROGRESS,
+        COMPLETED,
+        EXPIRED
+    }
+
+    public enum AssessmentStatus {
+        PENDING,
+        IN_PROGRESS,
+        COMPLETED,
+        EXPIRED
+    }
 }

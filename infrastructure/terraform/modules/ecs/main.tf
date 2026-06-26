@@ -147,6 +147,10 @@ resource "aws_ecs_task_definition" "backend" {
         name      = "JWT_SECRET"
         valueFrom = var.jwt_secret_arn
       },
+      {
+        name      = "ANTHROPIC_API_KEY"
+        valueFrom = "${var.app_secrets_arn}:ANTHROPIC_API_KEY::"
+      },
     ]
 
     logConfiguration = {
