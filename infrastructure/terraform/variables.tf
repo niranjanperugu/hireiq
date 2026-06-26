@@ -48,6 +48,11 @@ variable "single_nat_gateway" {
 }
 
 # ── RDS ───────────────────────────────────────────────────────────────────────
+variable "db_engine_version" {
+  description = "PostgreSQL engine version (must be available in the target region)"
+  type        = string
+  default     = "16.9"
+}
 variable "db_instance_class" {
   type    = string
   default = "db.t3.medium"
@@ -82,6 +87,24 @@ variable "db_multi_az" {
 variable "db_backup_retention_days" {
   type    = number
   default = 7
+}
+
+variable "db_deletion_protection" {
+  description = "Protect RDS from accidental deletion (set false for test environments)"
+  type        = bool
+  default     = false
+}
+
+variable "db_skip_final_snapshot" {
+  description = "Skip final snapshot on destroy (set true for test environments)"
+  type        = bool
+  default     = true
+}
+
+variable "db_performance_insights" {
+  description = "Enable RDS Performance Insights (not supported on db.t3.micro)"
+  type        = bool
+  default     = false
 }
 
 # ── ECS ───────────────────────────────────────────────────────────────────────
@@ -167,6 +190,18 @@ variable "anthropic_model" {
   default = "claude-haiku-4-5-20251001"
 }
 
+variable "liquibase_enabled" {
+  description = "Set false when db/changelog files are absent (test mode uses ddl-auto=update)"
+  type        = string
+  default     = "false"
+}
+
+variable "db_ddl_auto" {
+  description = "Hibernate DDL auto mode: update (test) or validate (production)"
+  type        = string
+  default     = "update"
+}
+
 variable "github_actions_runner_token" {
   description = "GitHub Actions runner registration token for the EC2 self-hosted runner"
   type        = string
@@ -178,4 +213,16 @@ variable "github_repo_url" {
   description = "GitHub repository URL for the self-hosted runner"
   type        = string
   default     = "https://github.com/your-org/SmartHire"
+}
+
+variable "resource_group_name" {
+  description = "Tag applied to every resource for grouped cleanup (e.g. AWS Resource Groups)"
+  type        = string
+  default     = "hiresmart-test"
+}
+
+variable "enable_build_server" {
+  description = "Whether to provision the EC2 self-hosted GitHub Actions runner"
+  type        = bool
+  default     = false
 }

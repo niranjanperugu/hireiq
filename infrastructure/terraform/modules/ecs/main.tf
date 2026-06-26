@@ -128,8 +128,8 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "SPRING_PROFILES_ACTIVE",            value = var.environment },
       { name = "SPRING_DATASOURCE_URL",             value = var.db_url },
       { name = "SPRING_DATASOURCE_USERNAME",        value = var.db_username },
-      { name = "SPRING_JPA_HIBERNATE_DDL_AUTO",     value = "validate" },
-      { name = "SPRING_LIQUIBASE_ENABLED",          value = "true" },
+      { name = "SPRING_JPA_HIBERNATE_DDL_AUTO",     value = var.db_ddl_auto },
+      { name = "SPRING_LIQUIBASE_ENABLED",          value = var.liquibase_enabled },
       { name = "SPRING_JPA_DATABASE_PLATFORM",      value = "org.hibernate.dialect.PostgreSQLDialect" },
       { name = "SERVER_PORT",                       value = tostring(var.backend_port) },
       { name = "JWT_EXPIRATION",                    value = tostring(var.jwt_expiration_ms) },
@@ -236,10 +236,8 @@ resource "aws_ecs_service" "backend" {
     container_port   = var.backend_port
   }
 
-  deployment_configuration {
-    maximum_percent         = 200
-    minimum_healthy_percent = 100
-  }
+  deployment_maximum_percent         = 200
+  deployment_minimum_healthy_percent = 100
 
   deployment_circuit_breaker {
     enable   = true
@@ -275,10 +273,8 @@ resource "aws_ecs_service" "frontend" {
     container_port   = var.frontend_port
   }
 
-  deployment_configuration {
-    maximum_percent         = 200
-    minimum_healthy_percent = 100
-  }
+  deployment_maximum_percent         = 200
+  deployment_minimum_healthy_percent = 100
 
   deployment_circuit_breaker {
     enable   = true

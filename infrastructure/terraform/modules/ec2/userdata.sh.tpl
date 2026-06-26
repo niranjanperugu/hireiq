@@ -29,10 +29,10 @@ dnf install -y java-21-amazon-corretto-devel
 # ── Maven ─────────────────────────────────────────────────────────────────────
 echo "==> Installing Maven 3.9"
 MVN_VERSION="3.9.6"
-curl -fsSL "https://archive.apache.org/dist/maven/maven-3/${MVN_VERSION}/binaries/apache-maven-${MVN_VERSION}-bin.tar.gz" \
+curl -fsSL "https://archive.apache.org/dist/maven/maven-3/$${MVN_VERSION}/binaries/apache-maven-$${MVN_VERSION}-bin.tar.gz" \
   -o /tmp/maven.tar.gz
 tar -xzf /tmp/maven.tar.gz -C /opt/
-ln -sf /opt/apache-maven-${MVN_VERSION}/bin/mvn /usr/local/bin/mvn
+ln -sf /opt/apache-maven-$${MVN_VERSION}/bin/mvn /usr/local/bin/mvn
 rm /tmp/maven.tar.gz
 
 # ── Node.js 20 ────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ RUNNER_VERSION="2.319.1"
 mkdir -p /home/ec2-user/actions-runner
 cd /home/ec2-user/actions-runner
 
-curl -fsSL "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
+curl -fsSL "https://github.com/actions/runner/releases/download/v$${RUNNER_VERSION}/actions-runner-linux-x64-$${RUNNER_VERSION}.tar.gz" \
   -o actions-runner.tar.gz
 tar -xzf actions-runner.tar.gz
 rm actions-runner.tar.gz

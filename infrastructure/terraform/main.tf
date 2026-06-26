@@ -17,7 +17,7 @@ resource "random_password" "jwt_secret" {
 # ── Secrets Manager ───────────────────────────────────────────────────────────
 resource "aws_secretsmanager_secret" "db_password" {
   name                    = "${local.name_prefix}/db-password"
-  recovery_window_in_days = 7
+  recovery_window_in_days = var.enable_build_server ? 7 : 0
 }
 
 resource "aws_secretsmanager_secret_version" "db_password" {
@@ -27,7 +27,7 @@ resource "aws_secretsmanager_secret_version" "db_password" {
 
 resource "aws_secretsmanager_secret" "jwt_secret" {
   name                    = "${local.name_prefix}/jwt-secret"
-  recovery_window_in_days = 7
+  recovery_window_in_days = var.enable_build_server ? 7 : 0
 }
 
 resource "aws_secretsmanager_secret_version" "jwt_secret" {
@@ -38,7 +38,7 @@ resource "aws_secretsmanager_secret_version" "jwt_secret" {
 # Store AWS service credentials — values must be set via AWS Console or CLI after deploy
 resource "aws_secretsmanager_secret" "app_secrets" {
   name                    = "${local.name_prefix}/app-secrets"
-  recovery_window_in_days = 7
+  recovery_window_in_days = var.enable_build_server ? 7 : 0
 }
 
 # ── VPC ───────────────────────────────────────────────────────────────────────
@@ -76,6 +76,7 @@ module "rds" {
   source = "./modules/rds"
 
   name_prefix              = local.name_prefix
+  db_engine_version        = var.db_engine_version
   db_name                  = var.db_name
   db_username              = var.db_username
   db_password              = random_password.db_password.result
@@ -84,6 +85,9 @@ module "rds" {
   db_max_allocated_storage = var.db_max_allocated_storage
   db_multi_az              = var.db_multi_az
   db_backup_retention_days = var.db_backup_retention_days
+  db_deletion_protection   = var.db_deletion_protection
+  db_skip_final_snapshot   = var.db_skip_final_snapshot
+  db_performance_insights  = var.db_performance_insights
   private_subnet_ids       = module.vpc.private_subnet_ids
   rds_security_group_id    = module.security_groups.rds_sg_id
 }
@@ -138,10 +142,13 @@ module "ecs" {
   jwt_expiration_ms       = var.jwt_expiration_ms
   anthropic_model         = var.anthropic_model
   environment             = var.environment
+  liquibase_enabled       = var.liquibase_enabled
+  db_ddl_auto             = var.db_ddl_auto
 }
 
-# ── EC2 Build / CI Server ─────────────────────────────────────────────────────
+# ── EC2 Build / CI Server (optional — disable for test mode) ──────────────────
 module "ec2_build" {
+  count  = var.enable_build_server ? 1 : 0
   source = "./modules/ec2"
 
   name_prefix                 = local.name_prefix
@@ -157,6 +164,24 @@ module "ec2_build" {
   ecs_backend_service         = module.ecs.backend_service_name
   ecs_frontend_service        = module.ecs.frontend_service_name
   ecs_cluster_name            = module.ecs.cluster_name
+}
+
+# ── AWS Resource Group (tag-based — delete everything with one console click) ──
+resource "aws_resourcegroups_group" "main" {
+  name        = var.resource_group_name
+  description = "All HireIQ ${var.environment} resources - delete this group to clean up"
+
+  resource_query {
+    query = jsonencode({
+      ResourceTypeFilters = ["AWS::AllSupported"]
+      TagFilters = [{
+        Key    = "ResourceGroup"
+        Values = [var.resource_group_name]
+      }]
+    })
+  }
+
+  tags = { Name = var.resource_group_name }
 }
 
 # ── CloudWatch Log Groups ─────────────────────────────────────────────────────

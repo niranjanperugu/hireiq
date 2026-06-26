@@ -31,3 +31,11 @@ variable "app_secrets_arn"         { type = string }
 variable "alb_dns_name"            { type = string }
 variable "jwt_expiration_ms"       { type = number }
 variable "anthropic_model"         { type = string }
+variable "liquibase_enabled" {
+  type    = string
+  default = "false"
+}
+variable "db_ddl_auto" {
+  type    = string
+  default = "update"
+}

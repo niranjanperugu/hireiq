@@ -1,3 +1,8 @@
+locals {
+  # ALB target group names are limited to 32 characters
+  tg_prefix = substr(var.name_prefix, 0, min(length(var.name_prefix), 22))
+}
+
 resource "aws_lb" "main" {
   name               = "${var.name_prefix}-alb"
   internal           = false
@@ -12,7 +17,7 @@ resource "aws_lb" "main" {
 
 # ── Target Groups ──────────────────────────────────────────────────────────────
 resource "aws_lb_target_group" "backend" {
-  name        = "${var.name_prefix}-backend-tg"
+  name        = "${local.tg_prefix}-be-tg"
   port        = var.backend_port
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
@@ -33,7 +38,7 @@ resource "aws_lb_target_group" "backend" {
 }
 
 resource "aws_lb_target_group" "frontend" {
-  name        = "${var.name_prefix}-frontend-tg"
+  name        = "${local.tg_prefix}-fe-tg"
   port        = var.frontend_port
   protocol    = "HTTP"
   vpc_id      = var.vpc_id

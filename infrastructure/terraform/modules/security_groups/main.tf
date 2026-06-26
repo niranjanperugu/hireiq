@@ -31,7 +31,7 @@ resource "aws_security_group" "alb" {
 # ── Backend ECS Security Group ─────────────────────────────────────────────────
 resource "aws_security_group" "backend_ecs" {
   name        = "${var.name_prefix}-backend-ecs-sg"
-  description = "Backend ECS tasks — accept traffic from ALB only"
+  description = "Backend ECS tasks - accept traffic from ALB only"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -54,7 +54,7 @@ resource "aws_security_group" "backend_ecs" {
 # ── Frontend ECS Security Group ────────────────────────────────────────────────
 resource "aws_security_group" "frontend_ecs" {
   name        = "${var.name_prefix}-frontend-ecs-sg"
-  description = "Frontend ECS tasks — accept traffic from ALB only"
+  description = "Frontend ECS tasks - accept traffic from ALB only"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -107,7 +107,7 @@ resource "aws_security_group" "rds" {
 # ── EC2 Build Server Security Group ───────────────────────────────────────────
 resource "aws_security_group" "build_ec2" {
   name        = "${var.name_prefix}-build-ec2-sg"
-  description = "EC2 build server — SSH from allowed IPs, all egress"
+  description = "EC2 build server - SSH from allowed IPs, all egress"
   vpc_id      = var.vpc_id
 
   ingress {

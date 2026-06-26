@@ -6,8 +6,8 @@ resource "aws_db_subnet_group" "main" {
 }
 
 resource "aws_db_parameter_group" "postgres" {
-  name   = "${var.name_prefix}-pg15-params"
-  family = "postgres15"
+  name   = "${var.name_prefix}-pg-params"
+  family = "postgres${split(".", var.db_engine_version)[0]}"
 
   parameter {
     name  = "log_connections"
@@ -25,8 +25,9 @@ resource "aws_db_parameter_group" "postgres" {
   }
 
   parameter {
-    name  = "shared_preload_libraries"
-    value = "pg_stat_statements"
+    name         = "shared_preload_libraries"
+    value        = "pg_stat_statements"
+    apply_method = "pending-reboot"
   }
 
   tags = { Name = "${var.name_prefix}-pg-params" }
@@ -36,7 +37,7 @@ resource "aws_db_instance" "postgres" {
   identifier = "${var.name_prefix}-postgres"
 
   engine               = "postgres"
-  engine_version       = "15.4"
+  engine_version       = var.db_engine_version
   instance_class       = var.db_instance_class
   allocated_storage    = var.db_allocated_storage
   max_allocated_storage = var.db_max_allocated_storage
@@ -58,12 +59,12 @@ resource "aws_db_instance" "postgres" {
   backup_window           = "03:00-04:00"
   maintenance_window      = "Mon:04:00-Mon:05:00"
 
-  deletion_protection     = true
-  skip_final_snapshot     = false
-  final_snapshot_identifier = "${var.name_prefix}-final-snapshot-${formatdate("YYYYMMDD", timestamp())}"
+  deletion_protection     = var.db_deletion_protection
+  skip_final_snapshot     = var.db_skip_final_snapshot
+  final_snapshot_identifier = var.db_skip_final_snapshot ? null : "${var.name_prefix}-final-snapshot-${formatdate("YYYYMMDD", timestamp())}"
 
-  performance_insights_enabled          = true
-  performance_insights_retention_period = 7
+  performance_insights_enabled          = var.db_performance_insights
+  performance_insights_retention_period = var.db_performance_insights ? 7 : null
 
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
 

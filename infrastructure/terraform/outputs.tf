@@ -36,12 +36,22 @@ output "ecs_frontend_service_name" {
 }
 
 output "build_server_public_ip" {
-  description = "Public IP of the EC2 build/CI server"
-  value       = module.ec2_build.public_ip
+  description = "Public IP of the EC2 build/CI server (empty when enable_build_server=false)"
+  value       = length(module.ec2_build) > 0 ? module.ec2_build[0].public_ip : "build server disabled"
 }
 
 output "build_server_instance_id" {
-  value = module.ec2_build.instance_id
+  value = length(module.ec2_build) > 0 ? module.ec2_build[0].instance_id : "build server disabled"
+}
+
+output "resource_group_name" {
+  description = "AWS Resource Group name — use this to view and delete all test resources"
+  value       = aws_resourcegroups_group.main.name
+}
+
+output "app_url" {
+  description = "Application URL via ALB (HTTP for test, HTTPS for production)"
+  value       = "http://${module.alb.alb_dns_name}"
 }
 
 output "db_secret_arn" {

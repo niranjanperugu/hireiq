@@ -27,10 +27,11 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "HireIQ"
-      Environment = var.environment
-      ManagedBy   = "Terraform"
-      Owner       = "DevOps"
+      Project       = "HireIQ"
+      Environment   = var.environment
+      ManagedBy     = "Terraform"
+      Owner         = "DevOps"
+      ResourceGroup = var.resource_group_name
     }
   }
 }
