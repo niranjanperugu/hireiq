@@ -69,5 +69,3 @@ secrets/
 *.key
 *.pem
 *.p12
-
-infrastructure/terraform/.terraform/providers/
